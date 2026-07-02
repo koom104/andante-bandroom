@@ -85,8 +85,19 @@ type NewTeamPayload = {
 };
 
 const days: Day[] = ["월", "화", "수", "목", "금", "토"];
-const timeSlots = ["15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
 const sessionOptions: SessionRole[] = ["보컬", "리드기타", "세컨기타", "어쿠스틱", "드럼", "피아노", "신디"];
+const scheduleStartMinutes = 10 * 60;
+const scheduleEndMinutes = 24 * 60;
+const slotMinutes = 30;
+const timeSlots = Array.from({ length: (scheduleEndMinutes - scheduleStartMinutes) / slotMinutes }, (_, index) =>
+  formatMinutes(scheduleStartMinutes + index * slotMinutes),
+);
+const timeBands = [
+  { id: "morning", label: "오전", range: "10-14", start: 10 * 60, end: 14 * 60 },
+  { id: "afternoon", label: "오후", range: "14-18", start: 14 * 60, end: 18 * 60 },
+  { id: "evening", label: "저녁", range: "18-22", start: 18 * 60, end: 22 * 60 },
+  { id: "night", label: "밤", range: "22-24", start: 22 * 60, end: 24 * 60 },
+];
 
 const colorPalette = [
   { color: "bg-red-600", accent: "#ef6351" },
@@ -109,17 +120,32 @@ const baseTabs: Array<{ id: Tab; label: string; short: string }> = [
 
 const adminTab = { id: "admin" as const, label: "관리", short: "!" };
 
+function timeToMinutes(time: string) {
+  const [hour, minute] = time.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function formatMinutes(totalMinutes: number) {
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 function hourOf(time: string) {
-  return Number(time.split(":")[0]);
+  return Math.floor(timeToMinutes(time) / 60);
 }
 
 function addHours(time: string, hours: number) {
-  return `${String(hourOf(time) + hours).padStart(2, "0")}:00`;
+  return formatMinutes(timeToMinutes(time) + hours * 60);
 }
 
 function reservationSlots(start: string, duration: number) {
   const startIndex = timeSlots.indexOf(start);
-  return timeSlots.slice(startIndex, startIndex + duration);
+  if (startIndex < 0) {
+    return [];
+  }
+
+  return timeSlots.slice(startIndex, startIndex + duration * (60 / slotMinutes));
 }
 
 function slotKey(day: Day, time: string) {
@@ -138,6 +164,11 @@ function isOpenWindow(reservations: Reservation[], day: Day, start: string, dura
   return reservationSlots(start, duration).every((time) => !findReservation(reservations, day, time));
 }
 
+function formatSlotHours(slotCount: number) {
+  const hours = (slotCount * slotMinutes) / 60;
+  return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+}
+
 function buildSuggestions(
   team: Team,
   busy: Record<string, string[]>,
@@ -146,9 +177,10 @@ function buildSuggestions(
   duration: number,
 ) {
   const candidates: Suggestion[] = [];
+  const durationSlotCount = duration * (60 / slotMinutes);
 
   for (const day of days) {
-    for (let index = 0; index <= timeSlots.length - duration; index += 1) {
+    for (let index = 0; index <= timeSlots.length - durationSlotCount; index += 1) {
       const start = timeSlots[index];
       const slots = reservationSlots(start, duration);
 
@@ -1423,7 +1455,7 @@ function MyPageTab({
         <div className="mt-4 grid grid-cols-3 gap-2">
           <ProfileStat label="소속 팀" value={selectedTeam?.name ?? "없음"} />
           <ProfileStat label="내 세션" value={selectedTeam ? memberRole : "미정"} />
-          <ProfileStat label="불가 시간" value={`${busyCount}개`} />
+          <ProfileStat label="불가 시간" value={formatSlotHours(busyCount)} />
         </div>
       </MobilePanel>
 
@@ -1448,7 +1480,7 @@ function MyPageTab({
 
       <MobilePanel title="내 시간표 편집">
         <p className="mb-3 text-xs leading-5 text-slate-500">
-          직접 막은 시간은 불가로, 팀 예약으로 막힌 시간은 합주로 표시됩니다.
+          10:00부터 24:00까지 30분 단위로 편집합니다. 직접 막은 시간은 불가로, 팀 예약으로 막힌 시간은 합주로 표시됩니다.
         </p>
         <ScheduleGrid busy={ownBusy} rehearsals={ownRehearsals} onToggle={toggleBusy} />
       </MobilePanel>
@@ -1969,13 +2001,22 @@ function CompactDayRow({
   reservations: Reservation[];
   selectedTeamId: string;
 }) {
+  const dayReservations = reservations
+    .filter((reservation) => reservation.status === "confirmed" && reservation.day === day)
+    .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+  const reservedSlotCount = new Set(dayReservations.flatMap((reservation) => reservationSlots(reservation.start, reservation.duration))).size;
+
   return (
     <div className="rounded-lg border border-[#f0ded7] bg-white p-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold">{day}요일</span>
-        <span className="text-xs text-slate-500">15:00-22:00</span>
+        <span className="text-xs text-slate-500">10:00-24:00</span>
       </div>
-      <div className="mt-3 grid grid-cols-4 gap-1.5">
+      <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+        <span>{dayReservations.length > 0 ? `${dayReservations.length}건 예약` : "예약 없음"}</span>
+        <span>{reservedSlotCount > 0 ? `${formatSlotHours(reservedSlotCount)} 사용` : "전체 비어 있음"}</span>
+      </div>
+      <div className="mt-3 grid gap-0.5" style={{ gridTemplateColumns: `repeat(${timeSlots.length}, minmax(0, 1fr))` }}>
         {timeSlots.map((time) => {
           const reservation = findReservation(reservations, day, time);
           const isMine = reservation?.teamId === selectedTeamId;
@@ -1983,19 +2024,39 @@ function CompactDayRow({
           return (
             <div
               key={`${day}-${time}`}
-              className={`min-h-12 rounded-md border px-1.5 py-1.5 text-[10px] leading-4 ${
+              title={`${day} ${time} ${reservation ? reservation.teamName : "빈 시간"}`}
+              className={`h-5 rounded-sm ${
                 reservation
                   ? isMine
-                    ? "border-[#ffb3aa] bg-[#fff0eb] text-[#be3d33]"
-                    : "border-slate-200 bg-slate-100 text-slate-500"
-                  : "border-emerald-100 bg-emerald-50 text-emerald-700"
+                    ? "bg-[#ff665a]"
+                    : "bg-slate-300"
+                  : "bg-emerald-100"
               }`}
             >
-              <span className="block font-semibold">{time}</span>
-              <span>{reservation ? reservation.teamName : "빈 시간"}</span>
+              <span className="sr-only">{reservation ? reservation.teamName : "빈 시간"}</span>
             </div>
           );
         })}
+      </div>
+      <div className="mt-3 space-y-1.5">
+        {dayReservations.slice(0, 4).map((reservation) => {
+          const isMine = reservation.teamId === selectedTeamId;
+
+          return (
+            <div
+              key={reservation.id}
+              className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs ${
+                isMine ? "bg-[#fff0eb] text-[#be3d33]" : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              <span className="font-semibold">
+                {reservation.start}-{addHours(reservation.start, reservation.duration)}
+              </span>
+              <span className="truncate">{reservation.teamName}</span>
+            </div>
+          );
+        })}
+        {dayReservations.length > 4 && <p className="text-xs text-slate-500">외 {dayReservations.length - 4}건 더 있음</p>}
       </div>
     </div>
   );
@@ -2036,17 +2097,50 @@ function ScheduleGrid({
   rehearsals?: string[];
   onToggle: (day: Day, time: string) => void;
 }) {
+  const [selectedBandId, setSelectedBandId] = useState(timeBands[0].id);
+  const selectedBand = timeBands.find((band) => band.id === selectedBandId) ?? timeBands[0];
+  const visibleTimeSlots = timeSlots.filter((time) => {
+    const minutes = timeToMinutes(time);
+    return minutes >= selectedBand.start && minutes < selectedBand.end;
+  });
+
   return (
-    <div className="grid grid-cols-[44px_repeat(6,minmax(38px,1fr))] gap-1">
-      <div />
-      {days.map((day) => (
-        <div key={day} className="flex h-8 items-center justify-center text-xs font-semibold text-slate-500">
-          {day}
-        </div>
-      ))}
-      {timeSlots.map((time) => (
-        <MemberScheduleRow key={time} time={time} busy={busy} rehearsals={rehearsals} onToggle={onToggle} />
-      ))}
+    <div className="space-y-3">
+      <div className="grid grid-cols-4 gap-1">
+        {timeBands.map((band) => (
+          <button
+            key={band.id}
+            type="button"
+            onClick={() => setSelectedBandId(band.id)}
+            className={`h-11 rounded-lg border text-xs font-semibold ${
+              selectedBand.id === band.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white text-slate-600"
+            }`}
+          >
+            <span className="block">{band.label}</span>
+            <span className="block text-[10px] opacity-75">{band.range}</span>
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center justify-between text-xs text-slate-500">
+        <span>{selectedBand.label} 시간대</span>
+        <span>30분 단위</span>
+      </div>
+      <div className="grid grid-cols-[44px_repeat(6,minmax(38px,1fr))] gap-1">
+        <div />
+        {days.map((day) => (
+          <div key={day} className="flex h-8 items-center justify-center text-xs font-semibold text-slate-500">
+            {day}
+          </div>
+        ))}
+        {visibleTimeSlots.map((time) => (
+          <MemberScheduleRow key={time} time={time} busy={busy} rehearsals={rehearsals} onToggle={onToggle} />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+        <span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-700">가능</span>
+        <span className="rounded-md bg-[#fff0eb] px-2 py-1 text-[#be3d33]">불가</span>
+        <span className="rounded-md bg-amber-50 px-2 py-1 text-amber-800">합주</span>
+      </div>
     </div>
   );
 }

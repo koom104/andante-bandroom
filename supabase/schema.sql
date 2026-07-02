@@ -40,7 +40,11 @@ create table if not exists public.team_members (
 create table if not exists public.member_schedules (
   user_id uuid not null references public.profiles(id) on delete cascade,
   day_of_week text not null check (day_of_week in ('월', '화', '수', '목', '금', '토')),
-  start_time text not null check (start_time in ('15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00')),
+  start_time text not null constraint member_schedules_start_time_range_check check (
+    start_time ~ '^(1[0-9]|2[0-3]):(00|30)$'
+    and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) >= 600
+    and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) < 1440
+  ),
   updated_by uuid references public.profiles(id),
   created_at timestamptz not null default now(),
   primary key (user_id, day_of_week, start_time)
@@ -50,7 +54,11 @@ create table if not exists public.bookings (
   id uuid primary key default gen_random_uuid(),
   team_id uuid not null references public.teams(id) on delete cascade,
   day_of_week text not null check (day_of_week in ('월', '화', '수', '목', '금', '토')),
-  start_time text not null check (start_time in ('15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00')),
+  start_time text not null constraint bookings_start_time_range_check check (
+    start_time ~ '^(1[0-9]|2[0-3]):(00|30)$'
+    and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) >= 600
+    and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) < 1440
+  ),
   duration integer not null check (duration in (1, 2)),
   purpose text not null,
   status text not null default 'confirmed' check (status in ('confirmed', 'cancelled')),
@@ -58,7 +66,10 @@ create table if not exists public.bookings (
   cancelled_by uuid references public.profiles(id),
   cancel_reason text,
   created_at timestamptz not null default now(),
-  cancelled_at timestamptz
+  cancelled_at timestamptz,
+  constraint bookings_end_time_range_check check (
+    (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) + duration * 60 <= 1440
+  )
 );
 
 create table if not exists public.news_items (
@@ -320,19 +331,24 @@ begin
     raise exception '예약 요일이 올바르지 않습니다.';
   end if;
 
-  if p_start_time not in ('15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00') then
+  if p_start_time !~ '^(1[0-9]|2[0-3]):(00|30)$' then
     raise exception '예약 시간이 올바르지 않습니다.';
+  end if;
+
+  requested_start := split_part(p_start_time, ':', 1)::integer * 60 + split_part(p_start_time, ':', 2)::integer;
+
+  if requested_start < 600 or requested_start >= 1440 then
+    raise exception '예약 시간은 10:00부터 24:00 사이여야 합니다.';
   end if;
 
   if p_duration not in (1, 2) then
     raise exception '예약 길이는 1시간 또는 2시간이어야 합니다.';
   end if;
 
-  requested_start := split_part(p_start_time, ':', 1)::integer;
-  requested_end := requested_start + p_duration;
+  requested_end := requested_start + p_duration * 60;
 
-  if requested_end > 22 then
-    raise exception '22시 이후로 끝나는 예약은 만들 수 없습니다.';
+  if requested_end > 1440 then
+    raise exception '24시 이후로 끝나는 예약은 만들 수 없습니다.';
   end if;
 
   if exists (
@@ -340,8 +356,8 @@ begin
     from public.bookings
     where day_of_week = p_day
       and status = 'confirmed'
-      and split_part(start_time, ':', 1)::integer < requested_end
-      and split_part(start_time, ':', 1)::integer + duration > requested_start
+      and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) < requested_end
+      and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) + duration * 60 > requested_start
   ) then
     raise exception '이미 예약된 시간과 겹칩니다.';
   end if;
