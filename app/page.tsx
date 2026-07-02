@@ -4,7 +4,7 @@ import type { Session as SupabaseSession } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "./supabase";
 
-type Day = "월" | "화" | "수" | "목" | "금" | "토";
+type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
 type Tab = "booking" | "suggestions" | "my" | "team" | "news" | "admin";
 type Role = "member" | "admin";
 type ProfileStatus = "pending" | "approved" | "rejected" | "suspended";
@@ -47,6 +47,7 @@ type Reservation = {
   leaderName: string;
   leaderRole?: SessionRole;
   memberCount: number;
+  bookingDate?: string | null;
   day: Day;
   start: string;
   duration: number;
@@ -54,16 +55,14 @@ type Reservation = {
   status: "confirmed" | "cancelled";
 };
 
-type Suggestion = {
-  day: Day;
-  start: string;
+type BookingSlot = {
+  time: string;
   end: string;
+  reservation?: Reservation;
   available: Member[];
   absent: Member[];
   absentReasons: Record<string, string>;
-  score: number;
-  isAllIn: boolean;
-  reason: string;
+  status: "reserved" | "available" | "limited" | "unavailable";
 };
 
 type NewsItem = {
@@ -88,7 +87,8 @@ type NewTeamPayload = {
   members: TeamMemberDraft[];
 };
 
-const days: Day[] = ["월", "화", "수", "목", "금", "토"];
+const days: Day[] = ["월", "화", "수", "목", "금", "토", "일"];
+const dateDayNames: Day[] = ["일", "월", "화", "수", "목", "금", "토"];
 const sessionOptions: SessionRole[] = ["보컬", "리드기타", "세컨기타", "어쿠스틱", "드럼", "피아노", "신디"];
 const scheduleStartMinutes = 10 * 60;
 const scheduleEndMinutes = 24 * 60;
@@ -115,8 +115,8 @@ const colorPalette = [
 const emptyBusy: Record<string, string[]> = {};
 
 const baseTabs: Array<{ id: Tab; label: string; short: string }> = [
-  { id: "booking", label: "예약", short: "R" },
-  { id: "suggestions", label: "추천", short: "A" },
+  { id: "booking", label: "메인", short: "홈" },
+  { id: "suggestions", label: "예약", short: "R" },
   { id: "my", label: "마이", short: "M" },
   { id: "team", label: "팀", short: "+" },
   { id: "news", label: "소식", short: "N" },
@@ -135,12 +135,57 @@ function formatMinutes(totalMinutes: number) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
-function hourOf(time: string) {
-  return Math.floor(timeToMinutes(time) / 60);
-}
-
 function addHours(time: string, hours: number) {
   return formatMinutes(timeToMinutes(time) + hours * 60);
+}
+
+function toISODate(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  const year = copy.getFullYear();
+  const month = String(copy.getMonth() + 1).padStart(2, "0");
+  const day = String(copy.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseISODate(date: string) {
+  return new Date(`${date}T00:00:00`);
+}
+
+function addDays(date: string, amount: number) {
+  const next = parseISODate(date);
+  next.setDate(next.getDate() + amount);
+  return toISODate(next);
+}
+
+function todayISO() {
+  return toISODate(new Date());
+}
+
+function dateToDay(date: string): Day {
+  return dateDayNames[parseISODate(date).getDay()];
+}
+
+function startOfWeek(date: string) {
+  const current = parseISODate(date);
+  const dayIndex = current.getDay();
+  const mondayOffset = dayIndex === 0 ? -6 : 1 - dayIndex;
+  current.setDate(current.getDate() + mondayOffset);
+  return toISODate(current);
+}
+
+function weekDates(anchorDate = todayISO()) {
+  const start = startOfWeek(anchorDate);
+  return Array.from({ length: 7 }, (_, index) => addDays(start, index));
+}
+
+function formatDateShort(date: string) {
+  const parsed = parseISODate(date);
+  return `${parsed.getMonth() + 1}.${parsed.getDate()}`;
+}
+
+function formatDateLabel(date: string) {
+  return `${formatDateShort(date)} ${dateToDay(date)}요일`;
 }
 
 function reservationSlots(start: string, duration: number) {
@@ -156,16 +201,28 @@ function slotKey(day: Day, time: string) {
   return `${day}-${time}`;
 }
 
-function isReserved(reservation: Reservation, day: Day, time: string) {
-  return reservation.status === "confirmed" && reservation.day === day && reservationSlots(reservation.start, reservation.duration).includes(time);
+function dateSlotKey(date: string, time: string) {
+  return `${date}-${time}`;
 }
 
-function findReservation(reservations: Reservation[], day: Day, time: string) {
-  return reservations.find((reservation) => isReserved(reservation, day, time));
+function reservationMatchesDate(reservation: Reservation, date: string) {
+  if (reservation.bookingDate) {
+    return reservation.bookingDate === date;
+  }
+
+  return reservation.day === dateToDay(date);
 }
 
-function isOpenWindow(reservations: Reservation[], day: Day, start: string, duration: number) {
-  return reservationSlots(start, duration).every((time) => !findReservation(reservations, day, time));
+function isReserved(reservation: Reservation, date: string, time: string) {
+  return (
+    reservation.status === "confirmed" &&
+    reservationMatchesDate(reservation, date) &&
+    reservationSlots(reservation.start, reservation.duration).includes(time)
+  );
+}
+
+function findReservation(reservations: Reservation[], date: string, time: string) {
+  return reservations.find((reservation) => isReserved(reservation, date, time));
 }
 
 function formatSlotHours(slotCount: number) {
@@ -173,71 +230,71 @@ function formatSlotHours(slotCount: number) {
   return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
 }
 
-function buildSuggestions(
+function formatDuration(duration: number) {
+  if (duration === 0.5) {
+    return "30분";
+  }
+
+  return Number.isInteger(duration) ? `${duration}시간` : `${duration}시간`;
+}
+
+function buildBookingSlots(
   team: Team,
   busy: Record<string, string[]>,
   rehearsalBusy: Record<string, string[]>,
   reservations: Reservation[],
-  duration: number,
+  date: string,
 ) {
-  const candidates: Suggestion[] = [];
-  const durationSlotCount = duration * (60 / slotMinutes);
+  const day = dateToDay(date);
 
-  for (const day of days) {
-    for (let index = 0; index <= timeSlots.length - durationSlotCount; index += 1) {
-      const start = timeSlots[index];
-      const slots = reservationSlots(start, duration);
+  return timeSlots.map((time): BookingSlot => {
+    const reservation = findReservation(reservations, date, time);
+    const slots = reservationSlots(time, 0.5);
 
-      if (!isOpenWindow(reservations, day, start, duration)) {
-        continue;
+    if (reservation) {
+      return {
+        time,
+        end: addHours(time, 0.5),
+        reservation,
+        available: [],
+        absent: team.members,
+        absentReasons: Object.fromEntries(team.members.map((member) => [member.id, "예약 있음"])),
+        status: "reserved",
+      };
+    }
+
+    const absentReasons: Record<string, string> = {};
+    const available = team.members.filter((member) => {
+      const manualBusy = busy[member.id] ?? [];
+      const rehearsalSlots = rehearsalBusy[member.id] ?? [];
+      const blockedByRehearsal = slots.some(
+        (slot) => rehearsalSlots.includes(dateSlotKey(date, slot)) || rehearsalSlots.includes(slotKey(day, slot)),
+      );
+      const blockedManually = slots.some((slot) => manualBusy.includes(slotKey(day, slot)));
+
+      if (blockedByRehearsal) {
+        absentReasons[member.id] = "합주 있음";
+        return false;
       }
 
-      const absentReasons: Record<string, string> = {};
-      const available = team.members.filter((member) => {
-        const manualBusy = busy[member.id] ?? [];
-        const rehearsalSlots = rehearsalBusy[member.id] ?? [];
-        const blockedByRehearsal = slots.some((slot) => rehearsalSlots.includes(slotKey(day, slot)));
-        const blockedManually = slots.some((slot) => manualBusy.includes(slotKey(day, slot)));
+      if (blockedManually) {
+        absentReasons[member.id] = "불가";
+        return false;
+      }
 
-        if (blockedByRehearsal) {
-          absentReasons[member.id] = "합주 있음";
-          return false;
-        }
+      return true;
+    });
+    const absent = team.members.filter((member) => !available.includes(member));
 
-        if (blockedManually) {
-          absentReasons[member.id] = "불가";
-          return false;
-        }
-
-        return true;
-      });
-      const absent = team.members.filter((member) => !available.includes(member));
-      const eveningBonus = hourOf(start) >= 18 && hourOf(start) <= 20 ? 8 : 0;
-      const weekendPenalty = day === "토" ? 3 : 0;
-      const score = available.length * 100 + eveningBonus - weekendPenalty - index;
-      const isAllIn = absent.length === 0;
-      const absentText =
-        absent.length > 0
-          ? absent.map((member) => `${member.name} ${absentReasons[member.id] ?? "불가"}`).join(", ")
-          : "없음";
-
-      candidates.push({
-        day,
-        start,
-        end: addHours(start, duration),
-        available,
-        absent,
-        absentReasons,
-        score,
-        isAllIn,
-        reason: isAllIn
-          ? "예약표와 팀원 시간표가 모두 비어 있어요."
-          : `${available.length}명 가능, 불참 예상: ${absentText}`,
-      });
-    }
-  }
-
-  return candidates.sort((a, b) => b.score - a.score).slice(0, 5);
+    return {
+      time,
+      end: addHours(time, 0.5),
+      available,
+      absent,
+      absentReasons,
+      status: available.length === team.members.length ? "available" : available.length > 0 ? "limited" : "unavailable",
+    };
+  });
 }
 
 function getErrorMessage(error: unknown) {
@@ -272,8 +329,7 @@ export default function Home() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState("");
-  const [duration, setDuration] = useState(2);
-  const [draft, setDraft] = useState<Suggestion | null>(null);
+  const [selectedBookingDate, setSelectedBookingDate] = useState(todayISO);
   const [activeTab, setActiveTab] = useState<Tab>("booking");
   const [status, setStatus] = useState("로그인 후 팀 예약을 시작할 수 있어요.");
   const [authNotice, setAuthNotice] = useState("");
@@ -422,6 +478,7 @@ export default function Home() {
     const bookingRows = (bookingResult.data ?? []) as Array<{
       id: string;
       team_id: string;
+      booking_date: string | null;
       day_of_week: Day;
       start_time: string;
       duration: number;
@@ -441,6 +498,7 @@ export default function Home() {
         leaderName: leader?.name ?? "-",
         leaderRole: leader?.role,
         memberCount: team?.members.length ?? 0,
+        bookingDate: booking.booking_date,
         day: booking.day_of_week,
         start: booking.start_time,
         duration: booking.duration,
@@ -456,9 +514,12 @@ export default function Home() {
 
       const memberIds = teamMembersByTeam.get(booking.teamId) ?? [];
       for (const memberId of memberIds) {
+        const reservationKeys = reservationSlots(booking.start, booking.duration).map((slot) =>
+          booking.bookingDate ? dateSlotKey(booking.bookingDate, slot) : slotKey(booking.day, slot),
+        );
         rehearsalMap[memberId] = [
           ...(rehearsalMap[memberId] ?? []),
-          ...reservationSlots(booking.start, booking.duration).map((slot) => slotKey(booking.day, slot)),
+          ...reservationKeys,
         ];
       }
     }
@@ -535,18 +596,18 @@ export default function Home() {
   const visibleTabs = profile?.role === "admin" ? [...baseTabs, adminTab] : baseTabs;
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
-
-  const suggestions = useMemo(
-    () => (selectedTeam ? buildSuggestions(selectedTeam, busy, selectedTeamRehearsals, reservations, duration) : []),
-    [selectedTeam, busy, selectedTeamRehearsals, reservations, duration],
+  const currentWeekDates = useMemo(() => weekDates(todayISO()), []);
+  const bookingSlots = useMemo(
+    () => (selectedTeam ? buildBookingSlots(selectedTeam, busy, selectedTeamRehearsals, reservations, selectedBookingDate) : []),
+    [selectedTeam, busy, selectedTeamRehearsals, reservations, selectedBookingDate],
   );
-
-  const topSuggestion = suggestions[0];
-  const hasAllIn = suggestions.some((suggestion) => suggestion.isAllIn);
   const upcomingReservations = reservations
     .filter((reservation) => reservation.status === "confirmed")
     .slice()
-    .sort((a, b) => days.indexOf(a.day) - days.indexOf(b.day) || timeToMinutes(a.start) - timeToMinutes(b.start));
+    .sort((a, b) => {
+      const dateCompare = (a.bookingDate ?? "").localeCompare(b.bookingDate ?? "");
+      return dateCompare || days.indexOf(a.day) - days.indexOf(b.day) || timeToMinutes(a.start) - timeToMinutes(b.start);
+    });
 
   async function signIn(email: string, password: string) {
     setAuthNotice("");
@@ -600,8 +661,7 @@ export default function Home() {
     }
 
     setSelectedTeamId(nextTeam.id);
-    setDraft(null);
-    setStatus(`${nextTeam.name} 시간표로 다시 계산했어요.`);
+    setStatus(`${nextTeam.name} 팀을 선택했어요.`);
   }
 
   async function toggleSchedule(userId: string, day: Day, time: string) {
@@ -638,15 +698,8 @@ export default function Home() {
       }
     }
 
-    setDraft(null);
     setStatus("시간표 변경을 반영했어요.");
     await refreshData();
-  }
-
-  function selectSuggestion(suggestion: Suggestion) {
-    setDraft(suggestion);
-    setActiveTab("suggestions");
-    setStatus(`${suggestion.day}요일 ${suggestion.start} 추천을 선택했어요.`);
   }
 
   async function addTeam(payload: NewTeamPayload) {
@@ -681,52 +734,61 @@ export default function Home() {
     if (typeof data === "string") {
       setSelectedTeamId(data);
     }
-    setDraft(null);
     setActiveTab("booking");
     setStatus(`${payload.teamName} 팀이 추가됐어요.`);
   }
 
-  async function reserveDraft() {
+  function getBookingErrorMessage(error: unknown) {
+    const message = getErrorMessage(error);
+
+    if (
+      message.includes("create_booking") ||
+      message.includes("booking_date") ||
+      message.includes("duration") ||
+      message.includes("day_of_week")
+    ) {
+      return "DB 예약 구조가 아직 예전 설정입니다. Supabase SQL Editor에서 patch-004-date-bookings.sql을 한 번 실행해 주세요.";
+    }
+
+    return message;
+  }
+
+  async function reserveSlot(slot: BookingSlot) {
     if (!selectedTeam) {
       setActiveTab("team");
       setStatus("먼저 팀을 만들어 주세요.");
       return;
     }
 
-    if (!draft) {
-      setActiveTab("suggestions");
-      setStatus("추천 시간 중 하나를 먼저 선택해 주세요.");
+    if (slot.status === "reserved") {
+      setStatus("이미 예약된 시간입니다.");
       return;
     }
 
+    if (slot.status === "unavailable") {
+      setStatus("참여 가능한 팀원이 없는 시간입니다.");
+      return;
+    }
+
+    const bookingDay = dateToDay(selectedBookingDate);
     const { error } = await supabase.rpc("create_booking", {
       p_team_id: selectedTeam.id,
-      p_day: draft.day,
-      p_start_time: draft.start,
-      p_duration: duration,
+      p_day: bookingDay,
+      p_start_time: slot.time,
+      p_duration: 0.5,
       p_purpose: selectedTeam.song,
+      p_booking_date: selectedBookingDate,
     });
 
     if (error) {
-      setStatus(getErrorMessage(error));
-      setDraft(null);
+      setStatus(getBookingErrorMessage(error));
       await refreshData();
       return;
     }
 
-    setStatus(`${selectedTeam.name} 예약이 확정됐어요.`);
-    setDraft(null);
+    setStatus(`${formatDateLabel(selectedBookingDate)} ${slot.time} 예약이 확정됐어요.`);
     setActiveTab("booking");
     await refreshData();
-  }
-
-  function handlePrimaryAction() {
-    if (activeTab === "team" || activeTab === "admin") {
-      setActiveTab("booking");
-      return;
-    }
-
-    void reserveDraft();
   }
 
   async function approveProfile(profileId: string, nextStatus: "approved" | "rejected") {
@@ -822,15 +884,6 @@ export default function Home() {
     await refreshData();
   }
 
-  const primaryLabel =
-    activeTab === "team" || activeTab === "admin"
-      ? "예약 화면으로 돌아가기"
-      : !selectedTeam
-        ? "팀 만들기"
-        : draft
-          ? `${draft.day} ${draft.start} 예약 확정`
-          : "AI 추천 시간 선택하기";
-
   if (isBooting) {
     return (
       <PhoneShell>
@@ -889,12 +942,8 @@ export default function Home() {
                     teams={teams}
                     selectedTeam={selectedTeam}
                     reservations={upcomingReservations}
-                    suggestions={suggestions}
-                    topSuggestion={topSuggestion}
-                    duration={duration}
-                    setDuration={setDuration}
+                    weekDates={currentWeekDates}
                     changeTeam={changeTeam}
-                    selectSuggestion={selectSuggestion}
                     openTeamTab={() => setActiveTab("team")}
                     currentUserId={profile.id}
                     onCancelBooking={cancelBooking}
@@ -904,11 +953,10 @@ export default function Home() {
                 {activeTab === "suggestions" && (
                   <SuggestionsTab
                     selectedTeam={selectedTeam}
-                    suggestions={suggestions}
-                    draft={draft}
-                    duration={duration}
-                    hasAllIn={hasAllIn}
-                    onSelect={selectSuggestion}
+                    selectedDate={selectedBookingDate}
+                    setSelectedDate={setSelectedBookingDate}
+                    slots={bookingSlots}
+                    onReserve={reserveSlot}
                   />
                 )}
 
@@ -948,14 +996,7 @@ export default function Home() {
               </div>
 
               <div className="absolute inset-x-0 bottom-0 border-t border-[#f0ded7] bg-[#fff8f4]/95 px-4 pb-3 pt-3 backdrop-blur">
-                <button
-                  type="button"
-                  onClick={handlePrimaryAction}
-                  className="flex h-12 w-full items-center justify-center rounded-lg bg-[#ff665a] text-sm font-semibold text-white shadow-[0_10px_20px_rgba(239,99,81,0.28)] transition hover:bg-[#ef5548]"
-                >
-                  {primaryLabel}
-                </button>
-                <nav className="mt-3 grid gap-1" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }} aria-label="앱 탭">
+                <nav className="grid gap-1" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }} aria-label="앱 탭">
                   {visibleTabs.map((tab) => (
                     <button
                       key={tab.id}
@@ -1180,10 +1221,11 @@ function AppHeader({
         <button
           type="button"
           onClick={onSignOut}
-          className={`flex h-11 w-11 items-center justify-center rounded-lg ${selectedTeam?.color ?? "bg-slate-800"} text-xs font-bold text-white`}
+          className={`flex h-11 max-w-[120px] items-center justify-center truncate rounded-lg px-3 ${selectedTeam?.color ?? "bg-slate-800"} text-xs font-bold text-white`}
           aria-label="로그아웃"
+          title={`${profile.name} 로그아웃`}
         >
-          {profile.role === "admin" ? "AD" : "BR"}
+          {profile.name}
         </button>
       </div>
       <p className="mt-3 rounded-lg border border-[#f0ded7] bg-white px-3 py-2 text-xs leading-5 text-slate-600">
@@ -1197,12 +1239,8 @@ function BookingTab({
   teams,
   selectedTeam,
   reservations,
-  suggestions,
-  topSuggestion,
-  duration,
-  setDuration,
+  weekDates,
   changeTeam,
-  selectSuggestion,
   openTeamTab,
   currentUserId,
   onCancelBooking,
@@ -1210,17 +1248,13 @@ function BookingTab({
   teams: Team[];
   selectedTeam: Team | null;
   reservations: Reservation[];
-  suggestions: Suggestion[];
-  topSuggestion?: Suggestion;
-  duration: number;
-  setDuration: (duration: number) => void;
+  weekDates: string[];
   changeTeam: (teamId: string) => void;
-  selectSuggestion: (suggestion: Suggestion) => void;
   openTeamTab: () => void;
   currentUserId: string;
   onCancelBooking: (bookingId: string, reason: string) => Promise<void>;
 }) {
-  const [selectedReservationDay, setSelectedReservationDay] = useState<Day | null>(null);
+  const [selectedReservationDay, setSelectedReservationDay] = useState<string | null>(null);
 
   if (!selectedTeam) {
     return (
@@ -1229,7 +1263,7 @@ function BookingTab({
           <p className="text-xs font-semibold text-[#ef6351]">팀 필요</p>
           <h3 className="mt-1 text-2xl font-semibold">예약할 팀을 먼저 만들어 주세요</h3>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            승인된 부원 목록에서 팀장과 멤버를 선택한 뒤 세션을 지정하면 추천 시간이 계산됩니다.
+            승인된 부원 목록에서 팀장과 멤버를 선택한 뒤 세션을 지정하면 팀 단위 예약을 만들 수 있습니다.
           </p>
         </MobilePanel>
         <button type="button" onClick={openTeamTab} className="h-12 w-full rounded-lg bg-slate-950 text-sm font-semibold text-white">
@@ -1242,7 +1276,17 @@ function BookingTab({
   const leader = selectedTeam.members.find((member) => member.id === selectedTeam.leaderId);
   const isLeader = selectedTeam.leaderId === currentUserId;
   const teamReservations = reservations.filter((reservation) => reservation.teamId === selectedTeam.id);
-  const detailDay = selectedReservationDay ?? days.find((day) => reservations.some((reservation) => reservation.day === day)) ?? days[0];
+  const selectedTeamWeekReservations = teamReservations
+    .filter((reservation) => weekDates.some((date) => reservationMatchesDate(reservation, date)))
+    .sort((a, b) => {
+      const aDate = a.bookingDate ?? weekDates.find((date) => reservationMatchesDate(a, date)) ?? "";
+      const bDate = b.bookingDate ?? weekDates.find((date) => reservationMatchesDate(b, date)) ?? "";
+      return aDate.localeCompare(bDate) || timeToMinutes(a.start) - timeToMinutes(b.start);
+    });
+  const detailDate =
+    selectedReservationDay && weekDates.includes(selectedReservationDay)
+      ? selectedReservationDay
+      : weekDates.find((date) => reservations.some((reservation) => reservationMatchesDate(reservation, date))) ?? weekDates[0];
 
   return (
     <div className="space-y-3">
@@ -1259,10 +1303,8 @@ function BookingTab({
             )}
           </div>
           <div className="rounded-lg bg-[#fff0eb] px-3 py-2 text-right">
-            <p className="text-xs text-slate-500">최고 참여</p>
-            <p className="text-lg font-semibold">
-              {topSuggestion ? `${topSuggestion.available.length}/${selectedTeam.members.length}` : "-"}
-            </p>
+            <p className="text-xs text-slate-500">멤버</p>
+            <p className="text-lg font-semibold">{selectedTeam.members.length}명</p>
           </div>
         </div>
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
@@ -1281,55 +1323,47 @@ function BookingTab({
         </div>
       </MobilePanel>
 
-      <MobilePanel title="합주 길이">
-        <div className="grid grid-cols-2 gap-2">
-          {[1, 2].map((hours) => (
-            <button
-              key={hours}
-              type="button"
-              onClick={() => setDuration(hours)}
-              className={`h-10 rounded-lg border text-sm font-semibold ${
-                duration === hours ? "border-[#ff665a] bg-[#ff665a] text-white" : "border-[#f0ded7] bg-white"
-              }`}
-            >
-              {hours}시간
-            </button>
-          ))}
+      <MobilePanel title="이번 주 합주 일정">
+        <div className="space-y-2">
+          {selectedTeamWeekReservations.slice(0, 5).map((reservation) => {
+            const date = reservation.bookingDate ?? weekDates.find((item) => reservationMatchesDate(reservation, item));
+
+            return (
+              <div key={reservation.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">{date ? formatDateLabel(date) : `${reservation.day}요일`}</p>
+                    <p className="mt-1 text-xs text-slate-500">{reservation.purpose || selectedTeam.song}</p>
+                  </div>
+                  <p className="rounded-lg bg-slate-950 px-3 py-2 text-right text-xs font-semibold text-white">
+                    {reservation.start}
+                    <br />
+                    {addHours(reservation.start, reservation.duration)}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+          {selectedTeamWeekReservations.length === 0 && <EmptyText text="이번 주에 잡힌 합주가 없습니다." />}
         </div>
       </MobilePanel>
 
-      {topSuggestion && (
-        <MobilePanel title="가장 좋은 시간">
-          <button
-            type="button"
-            onClick={() => selectSuggestion(topSuggestion)}
-            className="w-full rounded-lg bg-slate-950 p-4 text-left text-white"
-          >
-            <p className="text-xs text-slate-300">{topSuggestion.isAllIn ? "전원 가능" : "최대 참여 추천"}</p>
-            <p className="mt-1 text-2xl font-semibold">
-              {topSuggestion.day} {topSuggestion.start}-{topSuggestion.end}
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-300">{topSuggestion.reason}</p>
-          </button>
-        </MobilePanel>
-      )}
-
-      <MobilePanel title="이번 주 예약표">
+      <MobilePanel title="이번 주 예약 현황">
         <div className="space-y-2">
-          {days.map((day) => (
+          {weekDates.map((date) => (
             <CompactDayRow
-              key={day}
-              day={day}
+              key={date}
+              date={date}
               reservations={reservations}
               selectedTeamId={selectedTeam.id}
-              isSelected={detailDay === day}
-              onSelect={() => setSelectedReservationDay(day)}
+              isSelected={detailDate === date}
+              onSelect={() => setSelectedReservationDay(date)}
             />
           ))}
         </div>
       </MobilePanel>
 
-      <ReservationDetailPanel day={detailDay} reservations={reservations} selectedTeamId={selectedTeam.id} />
+      <ReservationDetailPanel date={detailDate} reservations={reservations} selectedTeamId={selectedTeam.id} />
 
       {isLeader && (
         <MobilePanel title="팀장 예약 관리">
@@ -1338,7 +1372,8 @@ function BookingTab({
               <div key={reservation.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0ded7] bg-white p-3">
                 <div>
                   <p className="text-sm font-semibold">
-                    {reservation.day} {reservation.start}-{addHours(reservation.start, reservation.duration)}
+                    {reservation.bookingDate ? formatDateLabel(reservation.bookingDate) : `${reservation.day}요일`} {reservation.start}-
+                    {addHours(reservation.start, reservation.duration)}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">{reservation.purpose}</p>
                 </div>
@@ -1356,96 +1391,161 @@ function BookingTab({
         </MobilePanel>
       )}
 
-      <MobilePanel title="추천 후보 미리보기">
-        <div className="space-y-2">
-          {suggestions.slice(0, 3).map((suggestion) => (
-            <SuggestionMiniRow key={`${suggestion.day}-${suggestion.start}`} suggestion={suggestion} onSelect={selectSuggestion} />
-          ))}
-          {suggestions.length === 0 && <EmptyText text="예약 가능한 시간이 없습니다." />}
-        </div>
-      </MobilePanel>
     </div>
   );
 }
 
 function SuggestionsTab({
   selectedTeam,
-  suggestions,
-  draft,
-  duration,
-  hasAllIn,
-  onSelect,
+  selectedDate,
+  setSelectedDate,
+  slots,
+  onReserve,
 }: {
   selectedTeam: Team | null;
-  suggestions: Suggestion[];
-  draft: Suggestion | null;
-  duration: number;
-  hasAllIn: boolean;
-  onSelect: (suggestion: Suggestion) => void;
+  selectedDate: string;
+  setSelectedDate: (date: string) => void;
+  slots: BookingSlot[];
+  onReserve: (slot: BookingSlot) => Promise<void>;
 }) {
   if (!selectedTeam) {
-    return <EmptyState title="추천할 팀이 없습니다" body="팀 탭에서 먼저 팀을 만들어 주세요." />;
+    return <EmptyState title="예약할 팀이 없습니다" body="팀 탭에서 먼저 팀을 만들어 주세요." />;
   }
+
+  const quickDates = Array.from({ length: 14 }, (_, index) => addDays(todayISO(), index));
+  const availableCount = slots.filter((slot) => slot.status === "available").length;
+  const limitedCount = slots.filter((slot) => slot.status === "limited").length;
+  const reservedCount = slots.filter((slot) => slot.status === "reserved").length;
 
   return (
     <div className="space-y-3">
       <MobilePanel>
-        <p className="text-xs font-semibold text-[#ef6351]">AI 시간 추천</p>
-        <h3 className="mt-1 text-2xl font-semibold">{selectedTeam.name}</h3>
+        <p className="text-xs font-semibold text-[#ef6351]">합주 예약</p>
+        <h3 className="mt-1 text-2xl font-semibold">{formatDateLabel(selectedDate)}</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          {duration}시간 연속으로 비어 있는 예약표를 찾고, 팀원 시간표와 비교해 참여 인원이 많은 순서로 정렬했어요.
-        </p>
-        <p className="mt-3 rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">
-          {hasAllIn ? "전원 가능 시간이 먼저 표시됩니다." : "전원 가능 시간이 없어 최대 참여 인원 기준으로 추천합니다."}
+          {selectedTeam.name} 팀 기준으로 예약 가능한 30분 단위 시간대를 표시합니다.
         </p>
       </MobilePanel>
 
-      <div className="space-y-3">
-        {suggestions.map((suggestion, index) => {
-          const selected = draft?.day === suggestion.day && draft?.start === suggestion.start;
-
-          return (
+      <MobilePanel title="날짜 선택">
+        <label className="block">
+          <span className="text-xs font-semibold text-slate-500">예약 날짜</span>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(event) => setSelectedDate(event.target.value || todayISO())}
+            className="mt-2 h-11 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm font-semibold outline-none transition focus:border-[#ff665a]"
+          />
+        </label>
+        <div className="mt-3 grid grid-cols-7 gap-1">
+          {quickDates.map((date) => (
             <button
-              key={`${suggestion.day}-${suggestion.start}`}
+              key={date}
               type="button"
-              onClick={() => onSelect(suggestion)}
-              className={`w-full rounded-lg border p-4 text-left transition ${
-                selected ? "border-[#ff665a] bg-[#fff0eb]" : "border-[#f0ded7] bg-white"
+              onClick={() => setSelectedDate(date)}
+              className={`h-14 rounded-lg border text-xs font-semibold ${
+                selectedDate === date ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white text-slate-600"
               }`}
             >
-              <div className="flex items-center justify-between">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-950 text-xs font-bold text-white">
-                  {index + 1}
-                </span>
-                <span
-                  className={`rounded-lg px-2 py-1 text-xs font-semibold ${
-                    suggestion.isAllIn ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"
-                  }`}
-                >
-                  {suggestion.isAllIn ? "전원 가능" : "최대 참여"}
-                </span>
-              </div>
-              <p className="mt-3 text-xl font-semibold">
-                {suggestion.day} {suggestion.start}-{suggestion.end}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{suggestion.reason}</p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {suggestion.available.map((member) => (
-                  <span key={member.id} className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
-                    {member.name} 가능
-                  </span>
-                ))}
-                {suggestion.absent.map((member) => (
-                  <span key={member.id} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">
-                    {member.name} {suggestion.absentReasons[member.id] ?? "불가"}
-                  </span>
-                ))}
-              </div>
+              <span className="block">{dateToDay(date)}</span>
+              <span className="mt-1 block">{formatDateShort(date)}</span>
             </button>
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="예약 가능 시간">
+        <div className="grid grid-cols-3 gap-2">
+          <ProfileStat label="전원 가능" value={`${availableCount}개`} />
+          <ProfileStat label="일부 가능" value={`${limitedCount}개`} />
+          <ProfileStat label="예약 완료" value={`${reservedCount}개`} />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
+          <span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-700">전원 가능</span>
+          <span className="rounded-md bg-amber-50 px-2 py-1 text-amber-800">일부 가능</span>
+          <span className="rounded-md bg-slate-100 px-2 py-1 text-slate-500">예약 완료</span>
+        </div>
+      </MobilePanel>
+
+      <div className="space-y-3">
+        {timeBands.map((band) => {
+          const bandSlots = slots.filter((slot) => {
+            const minutes = timeToMinutes(slot.time);
+            return minutes >= band.start && minutes < band.end;
+          });
+
+          return (
+            <MobilePanel key={band.id} title={`${band.label} ${band.range}`}>
+              <div className="space-y-2">
+                {bandSlots.map((slot) => (
+                  <BookingSlotRow key={slot.time} slot={slot} teamSize={selectedTeam.members.length} onReserve={onReserve} />
+                ))}
+              </div>
+            </MobilePanel>
           );
         })}
-        {suggestions.length === 0 && <EmptyText text="예약 가능한 시간이 없습니다." />}
       </div>
+    </div>
+  );
+}
+
+function BookingSlotRow({
+  slot,
+  teamSize,
+  onReserve,
+}: {
+  slot: BookingSlot;
+  teamSize: number;
+  onReserve: (slot: BookingSlot) => Promise<void>;
+}) {
+  const disabled = slot.status === "reserved" || slot.status === "unavailable";
+  const statusLabel =
+    slot.status === "reserved" ? "예약 완료" : slot.status === "available" ? "전원 가능" : slot.status === "limited" ? "일부 가능" : "불가";
+  const badgeClass =
+    slot.status === "reserved"
+      ? "bg-slate-100 text-slate-500"
+      : slot.status === "available"
+        ? "bg-emerald-50 text-emerald-700"
+        : slot.status === "limited"
+          ? "bg-amber-50 text-amber-800"
+          : "bg-rose-50 text-rose-700";
+
+  return (
+    <div className="rounded-lg border border-[#f0ded7] bg-white p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">
+            {slot.time}-{slot.end}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {slot.reservation
+              ? `${slot.reservation.teamName} 예약`
+              : `${slot.available.length}/${teamSize}명 가능`}
+          </p>
+        </div>
+        <span className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold ${badgeClass}`}>{statusLabel}</span>
+      </div>
+
+      {slot.absent.length > 0 && slot.status !== "reserved" && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {slot.absent.map((member) => (
+            <span key={member.id} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">
+              {member.name} {slot.absentReasons[member.id] ?? "불가"}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => void onReserve(slot)}
+        className={`mt-3 h-10 w-full rounded-lg text-sm font-semibold ${
+          disabled ? "bg-slate-100 text-slate-400" : "bg-[#ff665a] text-white"
+        }`}
+      >
+        {slot.status === "reserved" ? "이미 예약됨" : slot.status === "unavailable" ? "예약 불가" : "30분 예약"}
+      </button>
     </div>
   );
 }
@@ -1815,7 +1915,8 @@ function AdminTab({
               <div>
                 <p className="text-sm font-semibold">{reservation.teamName}</p>
                 <p className="mt-1 text-xs text-slate-500">
-                {reservation.day} {reservation.start} · {reservation.duration}시간
+                  {reservation.bookingDate ? formatDateLabel(reservation.bookingDate) : `${reservation.day}요일`} {reservation.start} ·{" "}
+                  {formatDuration(reservation.duration)}
                 </p>
               </div>
               <button
@@ -1994,7 +2095,7 @@ function NewsTab({
                 <p className="mt-1 text-xs text-slate-500">{reservation.purpose}</p>
               </div>
               <p className="text-right text-sm font-semibold">
-                {reservation.day}
+                {reservation.bookingDate ? formatDateShort(reservation.bookingDate) : reservation.day}
                 <br />
                 {reservation.start}
               </p>
@@ -2026,20 +2127,21 @@ function ProfileStat({ label, value }: { label: string; value: string }) {
 }
 
 function CompactDayRow({
-  day,
+  date,
   reservations,
   selectedTeamId,
   isSelected,
   onSelect,
 }: {
-  day: Day;
+  date: string;
   reservations: Reservation[];
   selectedTeamId: string;
   isSelected: boolean;
   onSelect: () => void;
 }) {
+  const day = dateToDay(date);
   const dayReservations = reservations
-    .filter((reservation) => reservation.status === "confirmed" && reservation.day === day)
+    .filter((reservation) => reservation.status === "confirmed" && reservationMatchesDate(reservation, date))
     .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
   const reservedSlotCount = new Set(dayReservations.flatMap((reservation) => reservationSlots(reservation.start, reservation.duration))).size;
 
@@ -2052,7 +2154,9 @@ function CompactDayRow({
       }`}
     >
       <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">{day}요일</span>
+        <span className="text-sm font-semibold">
+          {day}요일 <span className="text-xs text-slate-500">{formatDateShort(date)}</span>
+        </span>
         <span className={`text-xs ${isSelected ? "font-semibold text-[#be3d33]" : "text-slate-500"}`}>
           {isSelected ? "상세 보기" : "10:00-24:00"}
         </span>
@@ -2063,13 +2167,13 @@ function CompactDayRow({
       </div>
       <div className="mt-3 grid gap-0.5" style={{ gridTemplateColumns: `repeat(${timeSlots.length}, minmax(0, 1fr))` }}>
         {timeSlots.map((time) => {
-          const reservation = findReservation(reservations, day, time);
+          const reservation = findReservation(reservations, date, time);
           const isMine = reservation?.teamId === selectedTeamId;
 
           return (
             <div
               key={`${day}-${time}`}
-              title={`${day} ${time} ${reservation ? reservation.teamName : "빈 시간"}`}
+              title={`${formatDateLabel(date)} ${time} ${reservation ? reservation.teamName : "빈 시간"}`}
               className={`h-5 rounded-sm ${
                 reservation
                   ? isMine
@@ -2108,20 +2212,20 @@ function CompactDayRow({
 }
 
 function ReservationDetailPanel({
-  day,
+  date,
   reservations,
   selectedTeamId,
 }: {
-  day: Day;
+  date: string;
   reservations: Reservation[];
   selectedTeamId: string;
 }) {
   const dayReservations = reservations
-    .filter((reservation) => reservation.status === "confirmed" && reservation.day === day)
+    .filter((reservation) => reservation.status === "confirmed" && reservationMatchesDate(reservation, date))
     .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
   return (
-    <MobilePanel title={`${day}요일 예약 상세`}>
+    <MobilePanel title={`${formatDateLabel(date)} 예약 상세`}>
       <div className="space-y-2">
         {dayReservations.map((reservation) => {
           const isMine = reservation.teamId === selectedTeamId;
@@ -2159,9 +2263,9 @@ function ReservationDetailPanel({
               </div>
 
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                <ReservationMeta label="길이" value={`${reservation.duration}시간`} />
+                <ReservationMeta label="길이" value={formatDuration(reservation.duration)} />
                 <ReservationMeta label="멤버" value={reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"} />
-                <ReservationMeta label="요일" value={`${reservation.day}요일`} />
+                <ReservationMeta label="날짜" value={reservation.bookingDate ? formatDateShort(reservation.bookingDate) : `${reservation.day} 반복`} />
               </div>
 
               <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2">
@@ -2171,7 +2275,7 @@ function ReservationDetailPanel({
             </article>
           );
         })}
-        {dayReservations.length === 0 && <EmptyText text={`${day}요일에는 아직 예약이 없습니다.`} />}
+        {dayReservations.length === 0 && <EmptyText text={`${formatDateLabel(date)}에는 아직 예약이 없습니다.`} />}
       </div>
     </MobilePanel>
   );
@@ -2183,32 +2287,6 @@ function ReservationMeta({ label, value }: { label: string; value: string }) {
       <p className="font-semibold text-slate-500">{label}</p>
       <p className="mt-1 font-semibold text-slate-950">{value}</p>
     </div>
-  );
-}
-
-function SuggestionMiniRow({
-  suggestion,
-  onSelect,
-}: {
-  suggestion: Suggestion;
-  onSelect: (suggestion: Suggestion) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(suggestion)}
-      className="flex w-full items-center justify-between rounded-lg border border-[#f0ded7] bg-white p-3 text-left"
-    >
-      <div>
-        <p className="text-sm font-semibold">
-          {suggestion.day} {suggestion.start}-{suggestion.end}
-        </p>
-        <p className="mt-1 text-xs text-slate-500">{suggestion.reason}</p>
-      </div>
-      <span className="rounded-md bg-[#fff0eb] px-2 py-1 text-xs font-semibold text-[#be3d33]">
-        {suggestion.available.length}명
-      </span>
-    </button>
   );
 }
 
@@ -2249,7 +2327,7 @@ function ScheduleGrid({
         <span>{selectedBand.label} 시간대</span>
         <span>30분 단위</span>
       </div>
-      <div className="grid grid-cols-[44px_repeat(6,minmax(38px,1fr))] gap-1">
+      <div className="grid grid-cols-[42px_repeat(7,minmax(32px,1fr))] gap-1">
         <div />
         {days.map((day) => (
           <div key={day} className="flex h-8 items-center justify-center text-xs font-semibold text-slate-500">

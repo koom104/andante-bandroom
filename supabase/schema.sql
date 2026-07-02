@@ -39,7 +39,7 @@ create table if not exists public.team_members (
 
 create table if not exists public.member_schedules (
   user_id uuid not null references public.profiles(id) on delete cascade,
-  day_of_week text not null check (day_of_week in ('월', '화', '수', '목', '금', '토')),
+  day_of_week text not null check (day_of_week in ('월', '화', '수', '목', '금', '토', '일')),
   start_time text not null constraint member_schedules_start_time_range_check check (
     start_time ~ '^(1[0-9]|2[0-3]):(00|30)$'
     and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) >= 600
@@ -53,13 +53,14 @@ create table if not exists public.member_schedules (
 create table if not exists public.bookings (
   id uuid primary key default gen_random_uuid(),
   team_id uuid not null references public.teams(id) on delete cascade,
-  day_of_week text not null check (day_of_week in ('월', '화', '수', '목', '금', '토')),
+  booking_date date,
+  day_of_week text not null check (day_of_week in ('월', '화', '수', '목', '금', '토', '일')),
   start_time text not null constraint bookings_start_time_range_check check (
     start_time ~ '^(1[0-9]|2[0-3]):(00|30)$'
     and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) >= 600
     and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) < 1440
   ),
-  duration integer not null check (duration in (1, 2)),
+  duration numeric(3,1) not null check (duration in (0.5, 1, 1.5, 2)),
   purpose text not null,
   status text not null default 'confirmed' check (status in ('confirmed', 'cancelled')),
   created_by uuid references public.profiles(id),
@@ -306,8 +307,9 @@ create or replace function public.create_booking(
   p_team_id uuid,
   p_day text,
   p_start_time text,
-  p_duration integer,
-  p_purpose text
+  p_duration numeric,
+  p_purpose text,
+  p_booking_date date default null
 )
 returns uuid
 language plpgsql
@@ -318,6 +320,7 @@ declare
   new_booking_id uuid;
   requested_start integer;
   requested_end integer;
+  date_day text;
 begin
   if not public.is_approved(auth.uid()) then
     raise exception '승인된 사용자만 예약할 수 있습니다.';
@@ -327,8 +330,24 @@ begin
     raise exception '팀 멤버만 해당 팀 예약을 만들 수 있습니다.';
   end if;
 
-  if p_day not in ('월', '화', '수', '목', '금', '토') then
+  if p_day not in ('월', '화', '수', '목', '금', '토', '일') then
     raise exception '예약 요일이 올바르지 않습니다.';
+  end if;
+
+  if p_booking_date is not null then
+    date_day := case extract(dow from p_booking_date)::integer
+      when 0 then '일'
+      when 1 then '월'
+      when 2 then '화'
+      when 3 then '수'
+      when 4 then '목'
+      when 5 then '금'
+      when 6 then '토'
+    end;
+
+    if date_day <> p_day then
+      raise exception '예약 날짜와 요일이 일치하지 않습니다.';
+    end if;
   end if;
 
   if p_start_time !~ '^(1[0-9]|2[0-3]):(00|30)$' then
@@ -341,11 +360,11 @@ begin
     raise exception '예약 시간은 10:00부터 24:00 사이여야 합니다.';
   end if;
 
-  if p_duration not in (1, 2) then
-    raise exception '예약 길이는 1시간 또는 2시간이어야 합니다.';
+  if p_duration not in (0.5, 1, 1.5, 2) then
+    raise exception '예약 길이는 30분, 1시간, 1시간 30분, 2시간이어야 합니다.';
   end if;
 
-  requested_end := requested_start + p_duration * 60;
+  requested_end := requested_start + (p_duration * 60)::integer;
 
   if requested_end > 1440 then
     raise exception '24시 이후로 끝나는 예약은 만들 수 없습니다.';
@@ -356,14 +375,16 @@ begin
     from public.bookings
     where day_of_week = p_day
       and status = 'confirmed'
+      and (p_booking_date is null or booking_date is null or booking_date = p_booking_date)
       and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) < requested_end
-      and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) + duration * 60 > requested_start
+      and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) + (duration * 60)::integer > requested_start
   ) then
     raise exception '이미 예약된 시간과 겹칩니다.';
   end if;
 
   insert into public.bookings (
     team_id,
+    booking_date,
     day_of_week,
     start_time,
     duration,
@@ -372,6 +393,7 @@ begin
   )
   values (
     p_team_id,
+    p_booking_date,
     p_day,
     p_start_time,
     p_duration,
@@ -381,7 +403,7 @@ begin
   returning id into new_booking_id;
 
   insert into public.audit_logs (actor_id, action, target_type, target_id, reason)
-  values (auth.uid(), 'create_booking', 'booking', new_booking_id, p_day || ' ' || p_start_time);
+  values (auth.uid(), 'create_booking', 'booking', new_booking_id, coalesce(p_booking_date::text, p_day) || ' ' || p_start_time);
 
   return new_booking_id;
 end;
@@ -568,7 +590,7 @@ to authenticated
 with check (public.is_admin(auth.uid()) or actor_id = auth.uid());
 
 grant execute on function public.create_team(text, text, uuid, jsonb) to authenticated;
-grant execute on function public.create_booking(uuid, text, text, integer, text) to authenticated;
+grant execute on function public.create_booking(uuid, text, text, numeric, text, date) to authenticated;
 grant execute on function public.cancel_booking(uuid, text) to authenticated;
 
 insert into public.news_items (title, body, tag)
