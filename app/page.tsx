@@ -1,15 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import type { Session as SupabaseSession } from "@supabase/supabase-js";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ADMIN_EMAIL, supabase } from "./supabase";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토";
-type Tab = "booking" | "suggestions" | "my" | "team" | "news";
-type Session = "보컬" | "리드기타" | "세컨기타" | "어쿠스틱" | "드럼" | "피아노" | "신디";
+type Tab = "booking" | "suggestions" | "my" | "team" | "news" | "admin";
+type Role = "member" | "admin";
+type ProfileStatus = "pending" | "approved" | "rejected" | "suspended";
+type SessionRole = "보컬" | "리드기타" | "세컨기타" | "어쿠스틱" | "드럼" | "피아노" | "신디";
+
+type Profile = {
+  id: string;
+  email: string;
+  name: string;
+  cohort: string;
+  student_no: string;
+  role: Role;
+  status: ProfileStatus;
+  created_at?: string;
+};
 
 type Member = {
   id: string;
   name: string;
-  role: Session;
+  role: SessionRole;
+  cohort?: string;
 };
 
 type Team = {
@@ -31,6 +47,7 @@ type Reservation = {
   start: string;
   duration: number;
   purpose: string;
+  status: "confirmed" | "cancelled";
 };
 
 type Suggestion = {
@@ -44,23 +61,31 @@ type Suggestion = {
   reason: string;
 };
 
-type MemberDraft = {
+type NewsItem = {
   id: string;
+  title: string;
+  body: string;
+  tag: string;
+  created_at?: string;
+};
+
+type TeamMemberDraft = {
+  userId: string;
   name: string;
-  role: Session;
+  role: SessionRole;
 };
 
 type NewTeamPayload = {
   teamName: string;
   song: string;
-  leaderName: string;
-  leaderRole: Session;
-  members: MemberDraft[];
+  leaderId: string;
+  leaderRole: SessionRole;
+  members: TeamMemberDraft[];
 };
 
 const days: Day[] = ["월", "화", "수", "목", "금", "토"];
 const timeSlots = ["15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
-const sessionOptions: Session[] = ["보컬", "리드기타", "세컨기타", "어쿠스틱", "드럼", "피아노", "신디"];
+const sessionOptions: SessionRole[] = ["보컬", "리드기타", "세컨기타", "어쿠스틱", "드럼", "피아노", "신디"];
 
 const colorPalette = [
   { color: "bg-red-600", accent: "#ef6351" },
@@ -71,129 +96,9 @@ const colorPalette = [
   { color: "bg-slate-700", accent: "#334155" },
 ];
 
-const defaultTeams: Team[] = [
-  {
-    id: "afterglow",
-    name: "Afterglow",
-    song: "축제 오프닝 3곡",
-    color: "bg-red-600",
-    accent: "#ef6351",
-    leaderId: "minseo",
-    members: [
-      { id: "minseo", name: "민서", role: "보컬" },
-      { id: "jiho", name: "지호", role: "리드기타" },
-      { id: "yuna", name: "유나", role: "세컨기타" },
-      { id: "taeho", name: "태호", role: "드럼" },
-      { id: "arin", name: "아린", role: "신디" },
-    ],
-    busy: {
-      minseo: ["월-17:00", "화-18:00", "수-19:00", "목-18:00", "금-16:00"],
-      jiho: ["월-18:00", "화-19:00", "수-17:00", "목-20:00", "토-16:00"],
-      yuna: ["월-19:00", "화-16:00", "수-18:00", "금-19:00", "토-18:00"],
-      taeho: ["화-17:00", "수-20:00", "목-17:00", "금-18:00", "토-19:00"],
-      arin: ["월-16:00", "수-16:00", "목-19:00", "금-20:00", "토-17:00"],
-    },
-  },
-  {
-    id: "blueprint",
-    name: "Blue Print",
-    song: "어쿠스틱 커버 세트",
-    color: "bg-blue-600",
-    accent: "#2563eb",
-    leaderId: "seojun",
-    members: [
-      { id: "seojun", name: "서준", role: "보컬" },
-      { id: "haru", name: "하루", role: "어쿠스틱" },
-      { id: "narin", name: "나린", role: "드럼" },
-      { id: "doha", name: "도하", role: "피아노" },
-    ],
-    busy: {
-      seojun: ["월-16:00", "화-19:00", "목-18:00"],
-      haru: ["수-17:00", "금-17:00"],
-      narin: ["월-18:00", "수-19:00", "토-16:00"],
-      doha: ["화-17:00", "목-19:00", "금-20:00"],
-    },
-  },
-  {
-    id: "rhythm",
-    name: "Rhythm Lab",
-    song: "자작곡 편곡",
-    color: "bg-emerald-600",
-    accent: "#059669",
-    leaderId: "sian",
-    members: [
-      { id: "sian", name: "시안", role: "보컬" },
-      { id: "june", name: "준", role: "리드기타" },
-      { id: "rio", name: "리오", role: "세컨기타" },
-      { id: "haeun", name: "하은", role: "드럼" },
-    ],
-    busy: {
-      sian: ["월-19:00", "수-18:00", "금-17:00"],
-      june: ["화-16:00", "목-20:00"],
-      rio: ["월-17:00", "수-20:00", "토-18:00"],
-      haeun: ["화-18:00", "금-18:00"],
-    },
-  },
-];
+const emptyBusy: Record<string, string[]> = {};
 
-const initialReservations: Reservation[] = [
-  {
-    id: "r1",
-    teamId: "blueprint",
-    teamName: "Blue Print",
-    day: "월",
-    start: "18:00",
-    duration: 2,
-    purpose: "어쿠스틱 커버 합주",
-  },
-  {
-    id: "r2",
-    teamId: "rhythm",
-    teamName: "Rhythm Lab",
-    day: "수",
-    start: "16:00",
-    duration: 2,
-    purpose: "자작곡 드럼 편곡",
-  },
-  {
-    id: "r3",
-    teamId: "afterglow",
-    teamName: "Afterglow",
-    day: "금",
-    start: "20:00",
-    duration: 1,
-    purpose: "보컬 마이크 체크",
-  },
-  {
-    id: "r4",
-    teamId: "blueprint",
-    teamName: "Blue Print",
-    day: "토",
-    start: "17:00",
-    duration: 2,
-    purpose: "공연 전 런스루",
-  },
-];
-
-const news = [
-  {
-    title: "금요일까지 축제 셋리스트 제출",
-    body: "팀장은 최종 곡명, 러닝타임, 필요한 장비를 함께 등록해 주세요.",
-    tag: "공지",
-  },
-  {
-    title: "드럼 페달 교체 완료",
-    body: "새 페달은 A룸에 보관됩니다. 합주 후 장력은 기본값으로 돌려주세요.",
-    tag: "장비",
-  },
-  {
-    title: "신입부원 잼데이",
-    body: "토요일 15시에 자유 합주가 열립니다. 예약 없는 팀도 참관 가능합니다.",
-    tag: "행사",
-  },
-];
-
-const tabs: Array<{ id: Tab; label: string; short: string }> = [
+const baseTabs: Array<{ id: Tab; label: string; short: string }> = [
   { id: "booking", label: "예약", short: "R" },
   { id: "suggestions", label: "추천", short: "A" },
   { id: "my", label: "마이", short: "M" },
@@ -201,12 +106,7 @@ const tabs: Array<{ id: Tab; label: string; short: string }> = [
   { id: "news", label: "소식", short: "N" },
 ];
 
-function toBusyByTeam(teams: Team[]) {
-  return Object.fromEntries(teams.map((team) => [team.id, team.busy])) as Record<
-    string,
-    Record<string, string[]>
-  >;
-}
+const adminTab = { id: "admin" as const, label: "관리", short: "!" };
 
 function hourOf(time: string) {
   return Number(time.split(":")[0]);
@@ -226,7 +126,7 @@ function slotKey(day: Day, time: string) {
 }
 
 function isReserved(reservation: Reservation, day: Day, time: string) {
-  return reservation.day === day && reservationSlots(reservation.start, reservation.duration).includes(time);
+  return reservation.status === "confirmed" && reservation.day === day && reservationSlots(reservation.start, reservation.duration).includes(time);
 }
 
 function findReservation(reservations: Reservation[], day: Day, time: string) {
@@ -235,15 +135,6 @@ function findReservation(reservations: Reservation[], day: Day, time: string) {
 
 function isOpenWindow(reservations: Reservation[], day: Day, start: string, duration: number) {
   return reservationSlots(start, duration).every((time) => !findReservation(reservations, day, time));
-}
-
-function makeId(prefix: string, value: string) {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9가-힣]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return `${prefix}-${normalized || "item"}-${Date.now().toString(36)}`;
 }
 
 function buildSuggestions(
@@ -291,62 +182,363 @@ function buildSuggestions(
   return candidates.sort((a, b) => b.score - a.score).slice(0, 5);
 }
 
+function getErrorMessage(error: unknown) {
+  if (typeof error === "object" && error && "message" in error) {
+    return String((error as { message?: unknown }).message ?? "알 수 없는 오류가 발생했습니다.");
+  }
+
+  return "알 수 없는 오류가 발생했습니다.";
+}
+
+function isMissingSchemaError(message: string) {
+  return message.includes("relation") || message.includes("does not exist") || message.includes("schema");
+}
+
 export default function Home() {
-  const [teams, setTeams] = useState(defaultTeams);
-  const [selectedTeamId, setSelectedTeamId] = useState(defaultTeams[0].id);
-  const [selectedMemberId, setSelectedMemberId] = useState(defaultTeams[0].members[0].id);
+  const [session, setSession] = useState<SupabaseSession | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [busyByUser, setBusyByUser] = useState<Record<string, string[]>>({});
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState("");
   const [duration, setDuration] = useState(2);
-  const [busyByTeam, setBusyByTeam] = useState(() => toBusyByTeam(defaultTeams));
-  const [reservations, setReservations] = useState(initialReservations);
   const [draft, setDraft] = useState<Suggestion | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("booking");
-  const [status, setStatus] = useState("팀 시간표와 예약표를 비교하고 있어요.");
+  const [status, setStatus] = useState("로그인 후 팀 예약을 시작할 수 있어요.");
+  const [authNotice, setAuthNotice] = useState("");
+  const [isBooting, setIsBooting] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
 
-  const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0];
-  const selectedMember = selectedTeam.members.find((member) => member.id === selectedMemberId) ?? selectedTeam.members[0];
-  const busy = useMemo(
-    () => busyByTeam[selectedTeam.id] ?? {},
-    [busyByTeam, selectedTeam.id],
-  );
+  const loadProfile = useCallback(async (authSession: SupabaseSession) => {
+    setIsBooting(true);
+    setDbError(null);
+
+    const user = authSession.user;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      const message = getErrorMessage(error);
+      if (isMissingSchemaError(message)) {
+        setDbError("Supabase 테이블이 아직 만들어지지 않았습니다. supabase/schema.sql을 SQL Editor에서 먼저 실행해 주세요.");
+      } else {
+        setDbError(message);
+      }
+      setIsBooting(false);
+      return;
+    }
+
+    if (data) {
+      setProfile(data as Profile);
+      setStatus((data as Profile).status === "approved" ? "승인된 계정으로 접속했어요." : "관리자 승인을 기다리고 있어요.");
+      setIsBooting(false);
+      return;
+    }
+
+    const metadata = user.user_metadata ?? {};
+    const { data: inserted, error: insertError } = await supabase
+      .from("profiles")
+      .insert({
+        id: user.id,
+        email: user.email ?? "",
+        name: metadata.name ?? user.email?.split("@")[0] ?? "이름 미입력",
+        cohort: metadata.cohort ?? "-",
+        student_no: metadata.student_no ?? "-",
+      })
+      .select("*")
+      .single();
+
+    if (insertError) {
+      setDbError(getErrorMessage(insertError));
+      setIsBooting(false);
+      return;
+    }
+
+    setProfile(inserted as Profile);
+    setStatus("가입 신청이 접수됐어요. 관리자 승인을 기다려 주세요.");
+    setIsBooting(false);
+  }, []);
+
+  const refreshData = useCallback(async () => {
+    if (!profile || profile.status !== "approved") {
+      return;
+    }
+
+    setIsLoadingData(true);
+    setDbError(null);
+
+    const [profileResult, teamResult, memberResult, scheduleResult, bookingResult, newsResult] = await Promise.all([
+      supabase.from("profiles").select("*").order("created_at", { ascending: true }),
+      supabase.from("teams").select("*").order("created_at", { ascending: true }),
+      supabase.from("team_members").select("*").order("created_at", { ascending: true }),
+      supabase.from("member_schedules").select("*"),
+      supabase.from("bookings").select("*").order("created_at", { ascending: false }),
+      supabase.from("news_items").select("*").order("created_at", { ascending: false }),
+    ]);
+
+    const firstError = [profileResult, teamResult, memberResult, scheduleResult, bookingResult, newsResult].find((result) => result.error)?.error;
+    if (firstError) {
+      setDbError(getErrorMessage(firstError));
+      setIsLoadingData(false);
+      return;
+    }
+
+    const nextProfiles = (profileResult.data ?? []) as Profile[];
+    const profileMap = new Map(nextProfiles.map((item) => [item.id, item]));
+    const scheduleRows = (scheduleResult.data ?? []) as Array<{ user_id: string; day_of_week: Day; start_time: string }>;
+    const scheduleMap: Record<string, string[]> = {};
+
+    for (const row of scheduleRows) {
+      scheduleMap[row.user_id] = [...(scheduleMap[row.user_id] ?? []), slotKey(row.day_of_week, row.start_time)];
+    }
+
+    const memberRows = (memberResult.data ?? []) as Array<{
+      team_id: string;
+      user_id: string;
+      session: SessionRole;
+      is_leader: boolean;
+    }>;
+
+    const rawTeams = (teamResult.data ?? []) as Array<{
+      id: string;
+      name: string;
+      song: string;
+      color_index: number;
+    }>;
+
+    const nextTeams = rawTeams
+      .map((team, index) => {
+        const palette = colorPalette[(team.color_index ?? index) % colorPalette.length];
+        const rows = memberRows.filter((member) => member.team_id === team.id);
+        const members = rows
+          .map((member) => {
+            const memberProfile = profileMap.get(member.user_id);
+            if (!memberProfile) {
+              return null;
+            }
+
+            return {
+              id: member.user_id,
+              name: memberProfile.name,
+              role: member.session,
+              cohort: memberProfile.cohort,
+            };
+          })
+          .filter(Boolean) as Member[];
+        const leaderRow = rows.find((member) => member.is_leader);
+
+        return {
+          id: team.id,
+          name: team.name,
+          song: team.song,
+          color: palette.color,
+          accent: palette.accent,
+          leaderId: leaderRow?.user_id ?? members[0]?.id ?? "",
+          members,
+          busy: Object.fromEntries(members.map((member) => [member.id, scheduleMap[member.id] ?? []])),
+        };
+      })
+      .filter((team) => profile.role === "admin" || team.members.some((member) => member.id === profile.id));
+
+    const teamNameById = new Map(nextTeams.map((team) => [team.id, team.name]));
+    const bookingRows = (bookingResult.data ?? []) as Array<{
+      id: string;
+      team_id: string;
+      day_of_week: Day;
+      start_time: string;
+      duration: number;
+      purpose: string;
+      status: "confirmed" | "cancelled";
+    }>;
+
+    setProfiles(nextProfiles);
+    setBusyByUser(scheduleMap);
+    setTeams(nextTeams);
+    setReservations(
+      bookingRows.map((booking) => ({
+        id: booking.id,
+        teamId: booking.team_id,
+        teamName: teamNameById.get(booking.team_id) ?? "삭제된 팀",
+        day: booking.day_of_week,
+        start: booking.start_time,
+        duration: booking.duration,
+        purpose: booking.purpose,
+        status: booking.status,
+      })),
+    );
+    setNewsItems((newsResult.data ?? []) as NewsItem[]);
+    setIsLoadingData(false);
+  }, [profile]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) {
+        return;
+      }
+
+      setSession(data.session);
+      if (!data.session) {
+        setIsBooting(false);
+      }
+    });
+
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      if (!nextSession) {
+        setProfile(null);
+        setTeams([]);
+        setProfiles([]);
+        setReservations([]);
+        setNewsItems([]);
+        setIsBooting(false);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (session) {
+      const timeout = window.setTimeout(() => {
+        void loadProfile(session);
+      }, 0);
+
+      return () => window.clearTimeout(timeout);
+    }
+  }, [session, loadProfile]);
+
+  useEffect(() => {
+    if (profile?.status === "approved") {
+      const timeout = window.setTimeout(() => {
+        void refreshData();
+      }, 0);
+
+      return () => window.clearTimeout(timeout);
+    }
+  }, [profile?.status, refreshData]);
+
+  const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
+  const busy = useMemo(() => selectedTeam?.busy ?? emptyBusy, [selectedTeam]);
+  const visibleTabs = profile?.role === "admin" ? [...baseTabs, adminTab] : baseTabs;
+  const approvedProfiles = profiles.filter((item) => item.status === "approved");
+  const pendingProfiles = profiles.filter((item) => item.status === "pending");
 
   const suggestions = useMemo(
-    () => buildSuggestions(selectedTeam, busy, reservations, duration),
+    () => (selectedTeam ? buildSuggestions(selectedTeam, busy, reservations, duration) : []),
     [selectedTeam, busy, reservations, duration],
   );
 
   const topSuggestion = suggestions[0];
   const hasAllIn = suggestions.some((suggestion) => suggestion.isAllIn);
   const upcomingReservations = reservations
+    .filter((reservation) => reservation.status === "confirmed")
     .slice()
     .sort((a, b) => days.indexOf(a.day) - days.indexOf(b.day) || hourOf(a.start) - hourOf(b.start));
 
+  async function signIn(email: string, password: string) {
+    setAuthNotice("");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      setAuthNotice(getErrorMessage(error));
+      return;
+    }
+
+    setAuthNotice("로그인했습니다.");
+  }
+
+  async function signUp(payload: {
+    email: string;
+    password: string;
+    name: string;
+    cohort: string;
+    studentNo: string;
+  }) {
+    setAuthNotice("");
+    const { error } = await supabase.auth.signUp({
+      email: payload.email,
+      password: payload.password,
+      options: {
+        data: {
+          name: payload.name,
+          cohort: payload.cohort,
+          student_no: payload.studentNo,
+        },
+      },
+    });
+
+    if (error) {
+      setAuthNotice(getErrorMessage(error));
+      return;
+    }
+
+    setAuthNotice("가입 신청이 접수됐어요. 관리자 승인을 기다려 주세요.");
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setStatus("로그인 후 팀 예약을 시작할 수 있어요.");
+  }
+
   function changeTeam(teamId: string) {
     const nextTeam = teams.find((team) => team.id === teamId) ?? teams[0];
+    if (!nextTeam) {
+      return;
+    }
+
     setSelectedTeamId(nextTeam.id);
-    setSelectedMemberId(nextTeam.members[0].id);
     setDraft(null);
     setStatus(`${nextTeam.name} 시간표로 다시 계산했어요.`);
   }
 
-  function toggleBusy(day: Day, time: string) {
-    const key = slotKey(day, time);
-    setBusyByTeam((current) => {
-      const teamBusy = current[selectedTeam.id] ?? {};
-      const memberBusy = teamBusy[selectedMember.id] ?? [];
-      const nextMemberBusy = memberBusy.includes(key)
-        ? memberBusy.filter((item) => item !== key)
-        : [...memberBusy, key];
+  async function toggleSchedule(userId: string, day: Day, time: string) {
+    if (!profile) {
+      return;
+    }
 
-      return {
-        ...current,
-        [selectedTeam.id]: {
-          ...teamBusy,
-          [selectedMember.id]: nextMemberBusy,
-        },
-      };
-    });
+    const key = slotKey(day, time);
+    const isBusy = busyByUser[userId]?.includes(key);
+
+    if (isBusy) {
+      const { error } = await supabase
+        .from("member_schedules")
+        .delete()
+        .eq("user_id", userId)
+        .eq("day_of_week", day)
+        .eq("start_time", time);
+
+      if (error) {
+        setStatus(getErrorMessage(error));
+        return;
+      }
+    } else {
+      const { error } = await supabase.from("member_schedules").insert({
+        user_id: userId,
+        day_of_week: day,
+        start_time: time,
+        updated_by: profile.id,
+      });
+
+      if (error) {
+        setStatus(getErrorMessage(error));
+        return;
+      }
+    }
+
     setDraft(null);
-    setStatus(`${selectedMember.name} 시간표 변경을 반영했어요.`);
+    setStatus("시간표 변경을 반영했어요.");
+    await refreshData();
   }
 
   function selectSuggestion(suggestion: Suggestion) {
@@ -355,89 +547,222 @@ export default function Home() {
     setStatus(`${suggestion.day}요일 ${suggestion.start} 추천을 선택했어요.`);
   }
 
-  function addTeam(payload: NewTeamPayload) {
-    const leaderId = makeId("member", payload.leaderName);
-    const memberList: Member[] = [
+  async function addTeam(payload: NewTeamPayload) {
+    const members = [
       {
-        id: leaderId,
-        name: payload.leaderName.trim(),
-        role: payload.leaderRole,
+        user_id: payload.leaderId,
+        session: payload.leaderRole,
+        is_leader: true,
       },
-      ...payload.members.map((member) => ({
-        id: makeId("member", member.name),
-        name: member.name,
-        role: member.role,
-      })),
+      ...payload.members
+        .filter((member) => member.userId !== payload.leaderId)
+        .map((member) => ({
+          user_id: member.userId,
+          session: member.role,
+          is_leader: false,
+        })),
     ];
-    const palette = colorPalette[teams.length % colorPalette.length];
-    const teamId = makeId("team", payload.teamName);
-    const team: Team = {
-      id: teamId,
-      name: payload.teamName.trim(),
-      song: payload.song.trim() || "새 합주 준비",
-      color: palette.color,
-      accent: palette.accent,
-      leaderId,
-      members: memberList,
-      busy: Object.fromEntries(memberList.map((member) => [member.id, []])),
-    };
 
-    setTeams((current) => [...current, team]);
-    setBusyByTeam((current) => ({
-      ...current,
-      [team.id]: team.busy,
-    }));
-    setSelectedTeamId(team.id);
-    setSelectedMemberId(leaderId);
-    setDraft(null);
-    setActiveTab("booking");
-    setStatus(`${team.name} 팀이 추가됐어요. 팀장 ${payload.leaderName.trim()} 기준으로 추천을 시작합니다.`);
-  }
+    const { data, error } = await supabase.rpc("create_team", {
+      p_name: payload.teamName,
+      p_song: payload.song,
+      p_leader_id: payload.leaderId,
+      p_members: members,
+    });
 
-  function handlePrimaryAction() {
-    if (activeTab === "team") {
-      setActiveTab("booking");
+    if (error) {
+      setStatus(getErrorMessage(error));
       return;
     }
-    reserveDraft();
+
+    await refreshData();
+    if (typeof data === "string") {
+      setSelectedTeamId(data);
+    }
+    setDraft(null);
+    setActiveTab("booking");
+    setStatus(`${payload.teamName} 팀이 추가됐어요.`);
   }
 
-  function reserveDraft() {
+  async function reserveDraft() {
+    if (!selectedTeam) {
+      setActiveTab("team");
+      setStatus("먼저 팀을 만들어 주세요.");
+      return;
+    }
+
     if (!draft) {
       setActiveTab("suggestions");
       setStatus("추천 시간 중 하나를 먼저 선택해 주세요.");
       return;
     }
 
-    if (!isOpenWindow(reservations, draft.day, draft.start, duration)) {
-      setStatus("방금 다른 예약과 겹쳤어요. 추천을 다시 확인해 주세요.");
+    const { error } = await supabase.rpc("create_booking", {
+      p_team_id: selectedTeam.id,
+      p_day: draft.day,
+      p_start_time: draft.start,
+      p_duration: duration,
+      p_purpose: selectedTeam.song,
+    });
+
+    if (error) {
+      setStatus(getErrorMessage(error));
       setDraft(null);
+      await refreshData();
       return;
     }
 
-    setReservations((current) => [
-      ...current,
-      {
-        id: `r-${Date.now()}`,
-        teamId: selectedTeam.id,
-        teamName: selectedTeam.name,
-        day: draft.day,
-        start: draft.start,
-        duration,
-        purpose: selectedTeam.song,
-      },
-    ]);
-    setStatus(`${selectedTeam.name} 예약 요청이 추가됐어요.`);
+    setStatus(`${selectedTeam.name} 예약이 확정됐어요.`);
     setDraft(null);
     setActiveTab("booking");
+    await refreshData();
+  }
+
+  function handlePrimaryAction() {
+    if (activeTab === "team" || activeTab === "admin") {
+      setActiveTab("booking");
+      return;
+    }
+
+    void reserveDraft();
+  }
+
+  async function approveProfile(profileId: string, nextStatus: "approved" | "rejected") {
+    if (!profile) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        status: nextStatus,
+        approved_by: profile.id,
+        approved_at: nextStatus === "approved" ? new Date().toISOString() : null,
+      })
+      .eq("id", profileId);
+
+    if (error) {
+      setStatus(getErrorMessage(error));
+      return;
+    }
+
+    setStatus(nextStatus === "approved" ? "가입을 승인했어요." : "가입을 거절했어요.");
+    await refreshData();
+  }
+
+  async function addNews(payload: { title: string; body: string; tag: string }) {
+    if (!profile) {
+      return;
+    }
+
+    const { error } = await supabase.from("news_items").insert({
+      title: payload.title,
+      body: payload.body,
+      tag: payload.tag,
+      created_by: profile.id,
+    });
+
+    if (error) {
+      setStatus(getErrorMessage(error));
+      return;
+    }
+
+    setStatus("새 소식을 올렸어요.");
+    await refreshData();
+  }
+
+  async function deleteNews(newsId: string) {
+    const { error } = await supabase.from("news_items").delete().eq("id", newsId);
+
+    if (error) {
+      setStatus(getErrorMessage(error));
+      return;
+    }
+
+    setStatus("소식을 삭제했어요.");
+    await refreshData();
+  }
+
+  async function cancelBooking(bookingId: string, reason: string) {
+    if (!profile) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("bookings")
+      .update({
+        status: "cancelled",
+        cancelled_by: profile.id,
+        cancelled_at: new Date().toISOString(),
+        cancel_reason: reason || "관리자 취소",
+      })
+      .eq("id", bookingId);
+
+    if (error) {
+      setStatus(getErrorMessage(error));
+      return;
+    }
+
+    await supabase.from("audit_logs").insert({
+      actor_id: profile.id,
+      action: "cancel_booking",
+      target_type: "booking",
+      target_id: bookingId,
+      reason: reason || "관리자 취소",
+    });
+
+    setStatus("예약을 취소했어요.");
+    await refreshData();
   }
 
   const primaryLabel =
-    activeTab === "team"
+    activeTab === "team" || activeTab === "admin"
       ? "예약 화면으로 돌아가기"
-      : draft
-        ? `${draft.day} ${draft.start} 예약 요청`
-        : "AI 추천 시간 선택하기";
+      : !selectedTeam
+        ? "팀 만들기"
+        : draft
+          ? `${draft.day} ${draft.start} 예약 확정`
+          : "AI 추천 시간 선택하기";
+
+  if (isBooting) {
+    return (
+      <PhoneShell>
+        <CenteredMessage title="BandRoom AI" body="계정 상태를 확인하고 있어요." />
+      </PhoneShell>
+    );
+  }
+
+  if (!session) {
+    return (
+      <PhoneShell>
+        <AuthScreen onSignIn={signIn} onSignUp={signUp} notice={authNotice} />
+      </PhoneShell>
+    );
+  }
+
+  if (dbError) {
+    return (
+      <PhoneShell>
+        <SetupRequired error={dbError} onSignOut={signOut} />
+      </PhoneShell>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <PhoneShell>
+        <CenteredMessage title="프로필 확인 중" body="프로필을 불러오고 있어요." />
+      </PhoneShell>
+    );
+  }
+
+  if (profile.status !== "approved") {
+    return (
+      <PhoneShell>
+        <ApprovalScreen profile={profile} onRefresh={() => loadProfile(session)} onSignOut={signOut} />
+      </PhoneShell>
+    );
+  }
 
   return (
     <main className="h-screen overflow-hidden bg-[#f9ebe6] px-4 py-5 text-slate-950 sm:px-6">
@@ -450,20 +775,27 @@ export default function Home() {
             <div className="absolute left-1/2 top-0 z-20 h-5 w-28 -translate-x-1/2 rounded-b-2xl bg-slate-950" />
             <div className="relative flex h-[calc(100vh-60px)] min-h-[620px] max-h-[820px] flex-col overflow-hidden rounded-[30px] bg-[#fff8f4]">
               <PhoneStatusBar />
-              <AppHeader selectedTeam={selectedTeam} status={status} />
+              <AppHeader selectedTeam={selectedTeam} status={status} profile={profile} onSignOut={signOut} />
 
               <div className="flex-1 overflow-y-auto px-4 pb-32 pt-3">
+                {isLoadingData && (
+                  <p className="mb-3 rounded-lg border border-[#f0ded7] bg-white px-3 py-2 text-xs text-slate-500">
+                    데이터를 새로 불러오는 중입니다.
+                  </p>
+                )}
+
                 {activeTab === "booking" && (
                   <BookingTab
                     teams={teams}
                     selectedTeam={selectedTeam}
-                    reservations={reservations}
+                    reservations={upcomingReservations}
                     suggestions={suggestions}
                     topSuggestion={topSuggestion}
                     duration={duration}
                     setDuration={setDuration}
                     changeTeam={changeTeam}
                     selectSuggestion={selectSuggestion}
+                    openTeamTab={() => setActiveTab("team")}
                   />
                 )}
 
@@ -480,20 +812,35 @@ export default function Home() {
 
                 {activeTab === "my" && (
                   <MyPageTab
-                    teams={teams}
+                    profile={profile}
                     selectedTeam={selectedTeam}
-                    selectedMember={selectedMember}
-                    selectedMemberId={selectedMemberId}
+                    teams={teams}
+                    ownBusy={busyByUser[profile.id] ?? []}
                     changeTeam={changeTeam}
-                    setSelectedMemberId={setSelectedMemberId}
-                    busy={busy}
-                    toggleBusy={toggleBusy}
+                    toggleBusy={(day, time) => toggleSchedule(profile.id, day, time)}
                   />
                 )}
 
-                {activeTab === "team" && <TeamTab teams={teams} onAddTeam={addTeam} />}
+                {activeTab === "team" && (
+                  <TeamTab teams={teams} approvedProfiles={approvedProfiles} onAddTeam={addTeam} currentUserId={profile.id} />
+                )}
 
-                {activeTab === "news" && <NewsTab newsItems={news} reservations={upcomingReservations} />}
+                {activeTab === "news" && <NewsTab newsItems={newsItems} reservations={upcomingReservations} />}
+
+                {activeTab === "admin" && profile.role === "admin" && (
+                  <AdminTab
+                    pendingProfiles={pendingProfiles}
+                    approvedProfiles={approvedProfiles}
+                    reservations={upcomingReservations}
+                    newsItems={newsItems}
+                    busyByUser={busyByUser}
+                    approveProfile={approveProfile}
+                    addNews={addNews}
+                    deleteNews={deleteNews}
+                    cancelBooking={cancelBooking}
+                    toggleSchedule={toggleSchedule}
+                  />
+                )}
               </div>
 
               <div className="absolute inset-x-0 bottom-0 border-t border-[#f0ded7] bg-[#fff8f4]/95 px-4 pb-3 pt-3 backdrop-blur">
@@ -504,8 +851,8 @@ export default function Home() {
                 >
                   {primaryLabel}
                 </button>
-                <nav className="mt-3 grid grid-cols-5 gap-1" aria-label="앱 탭">
-                  {tabs.map((tab) => (
+                <nav className="mt-3 grid gap-1" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }} aria-label="앱 탭">
+                  {visibleTabs.map((tab) => (
                     <button
                       key={tab.id}
                       type="button"
@@ -528,6 +875,24 @@ export default function Home() {
   );
 }
 
+function PhoneShell({ children }: { children: ReactNode }) {
+  return (
+    <main className="h-screen overflow-hidden bg-[#f9ebe6] px-4 py-5 text-slate-950 sm:px-6">
+      <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
+        <section className="relative w-full max-w-[430px]">
+          <div className="relative rounded-[42px] border-[10px] border-slate-950 bg-slate-950 shadow-2xl">
+            <div className="absolute left-1/2 top-0 z-20 h-5 w-28 -translate-x-1/2 rounded-b-2xl bg-slate-950" />
+            <div className="relative flex h-[calc(100vh-60px)] min-h-[620px] max-h-[820px] flex-col overflow-hidden rounded-[30px] bg-[#fff8f4]">
+              <PhoneStatusBar />
+              <div className="flex-1 overflow-y-auto px-4 py-4">{children}</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 function PhoneStatusBar() {
   return (
     <div className="flex h-9 shrink-0 items-end justify-between px-6 pb-2 text-[11px] font-semibold text-slate-900">
@@ -540,7 +905,187 @@ function PhoneStatusBar() {
   );
 }
 
-function AppHeader({ selectedTeam, status }: { selectedTeam: Team; status: string }) {
+function CenteredMessage({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="flex min-h-full items-center justify-center">
+      <div className="w-full rounded-lg border border-[#f0ded7] bg-white p-5 text-center">
+        <p className="text-xs font-semibold text-[#ef6351]">BandRoom AI</p>
+        <h1 className="mt-2 text-2xl font-semibold">{title}</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">{body}</p>
+      </div>
+    </div>
+  );
+}
+
+function AuthScreen({
+  onSignIn,
+  onSignUp,
+  notice,
+}: {
+  onSignIn: (email: string, password: string) => Promise<void>;
+  onSignUp: (payload: { email: string; password: string; name: string; cohort: string; studentNo: string }) => Promise<void>;
+  notice: string;
+}) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState(ADMIN_EMAIL);
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [cohort, setCohort] = useState("");
+  const [studentNo, setStudentNo] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function submit() {
+    if (!email.trim() || !password.trim()) {
+      setMessage("이메일과 비밀번호를 입력해 주세요.");
+      return;
+    }
+
+    if (mode === "signup" && (!name.trim() || !cohort.trim() || !studentNo.trim())) {
+      setMessage("이름, 기수, 학번을 모두 입력해 주세요.");
+      return;
+    }
+
+    setMessage("");
+
+    if (mode === "login") {
+      await onSignIn(email.trim(), password);
+      return;
+    }
+
+    await onSignUp({
+      email: email.trim(),
+      password,
+      name: name.trim(),
+      cohort: cohort.trim(),
+      studentNo: studentNo.trim(),
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      <MobilePanel>
+        <p className="text-xs font-semibold text-[#ef6351]">BandRoom AI</p>
+        <h1 className="mt-2 text-2xl font-semibold">동아리방 예약 로그인</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          부원은 가입 신청 후 관리자 승인을 받아야 예약과 시간표 기능을 사용할 수 있습니다.
+        </p>
+      </MobilePanel>
+
+      <MobilePanel>
+        <div className="grid grid-cols-2 gap-2">
+          {(["login", "signup"] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setMode(item)}
+              className={`h-10 rounded-lg border text-sm font-semibold ${
+                mode === item ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
+              }`}
+            >
+              {item === "login" ? "로그인" : "회원가입"}
+            </button>
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title={mode === "login" ? "계정 로그인" : "가입 신청"}>
+        <div className="space-y-3">
+          <LabeledInput label="이메일" value={email} onChange={setEmail} placeholder="name@example.com" type="email" />
+          <LabeledInput label="비밀번호" value={password} onChange={setPassword} placeholder="8자 이상" type="password" />
+
+          {mode === "signup" && (
+            <>
+              <LabeledInput label="이름" value={name} onChange={setName} placeholder="홍길동" />
+              <LabeledInput label="기수" value={cohort} onChange={setCohort} placeholder="예: 12기" />
+              <LabeledInput label="학번" value={studentNo} onChange={setStudentNo} placeholder="예: 20261234" />
+            </>
+          )}
+
+          {(notice || message) && (
+            <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-[#be3d33]">{notice || message}</p>
+          )}
+
+          <button type="button" onClick={submit} className="h-12 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white">
+            {mode === "login" ? "로그인하기" : "가입 신청하기"}
+          </button>
+        </div>
+      </MobilePanel>
+    </div>
+  );
+}
+
+function SetupRequired({ error, onSignOut }: { error: string; onSignOut: () => void }) {
+  return (
+    <div className="space-y-3">
+      <MobilePanel>
+        <p className="text-xs font-semibold text-[#ef6351]">설정 필요</p>
+        <h1 className="mt-2 text-2xl font-semibold">DB 스키마를 먼저 실행해야 합니다</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          Supabase Dashboard의 SQL Editor에서 프로젝트의 `supabase/schema.sql` 내용을 한 번 실행하면 로그인, 승인, 예약 기능이 연결됩니다.
+        </p>
+      </MobilePanel>
+      <MobilePanel title="현재 오류">
+        <p className="text-xs leading-5 text-slate-600">{error}</p>
+      </MobilePanel>
+      <button type="button" onClick={onSignOut} className="h-11 w-full rounded-lg border border-slate-950 bg-white text-sm font-semibold">
+        로그아웃
+      </button>
+    </div>
+  );
+}
+
+function ApprovalScreen({
+  profile,
+  onRefresh,
+  onSignOut,
+}: {
+  profile: Profile;
+  onRefresh: () => void;
+  onSignOut: () => void;
+}) {
+  const isRejected = profile.status === "rejected";
+
+  return (
+    <div className="space-y-3">
+      <MobilePanel>
+        <p className="text-xs font-semibold text-[#ef6351]">{isRejected ? "가입 거절" : "승인 대기"}</p>
+        <h1 className="mt-2 text-2xl font-semibold">{profile.name}</h1>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          {isRejected
+            ? "관리자가 가입 신청을 거절했습니다. 입력 정보가 맞는지 확인해 주세요."
+            : "관리자가 가입 신청을 승인하면 예약과 시간표 기능을 사용할 수 있습니다."}
+        </p>
+      </MobilePanel>
+      <MobilePanel title="가입 정보">
+        <div className="grid grid-cols-3 gap-2">
+          <ProfileStat label="이름" value={profile.name} />
+          <ProfileStat label="기수" value={profile.cohort} />
+          <ProfileStat label="학번" value={profile.student_no} />
+        </div>
+      </MobilePanel>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={onRefresh} className="h-11 rounded-lg bg-slate-950 text-sm font-semibold text-white">
+          상태 새로고침
+        </button>
+        <button type="button" onClick={onSignOut} className="h-11 rounded-lg border border-slate-950 bg-white text-sm font-semibold">
+          로그아웃
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AppHeader({
+  selectedTeam,
+  status,
+  profile,
+  onSignOut,
+}: {
+  selectedTeam: Team | null;
+  status: string;
+  profile: Profile;
+  onSignOut: () => void;
+}) {
   return (
     <header className="shrink-0 px-4 pb-2 pt-1">
       <div className="flex items-center justify-between">
@@ -548,9 +1093,14 @@ function AppHeader({ selectedTeam, status }: { selectedTeam: Team; status: strin
           <p className="text-xs font-semibold text-[#ef6351]">BandRoom AI</p>
           <h2 className="mt-1 text-2xl font-semibold tracking-tight">합주실 예약</h2>
         </div>
-        <div className={`h-11 w-11 rounded-lg ${selectedTeam.color} flex items-center justify-center text-sm font-bold text-white`}>
-          BR
-        </div>
+        <button
+          type="button"
+          onClick={onSignOut}
+          className={`flex h-11 w-11 items-center justify-center rounded-lg ${selectedTeam?.color ?? "bg-slate-800"} text-xs font-bold text-white`}
+          aria-label="로그아웃"
+        >
+          {profile.role === "admin" ? "AD" : "BR"}
+        </button>
       </div>
       <p className="mt-3 rounded-lg border border-[#f0ded7] bg-white px-3 py-2 text-xs leading-5 text-slate-600">
         {status}
@@ -569,9 +1119,10 @@ function BookingTab({
   setDuration,
   changeTeam,
   selectSuggestion,
+  openTeamTab,
 }: {
   teams: Team[];
-  selectedTeam: Team;
+  selectedTeam: Team | null;
   reservations: Reservation[];
   suggestions: Suggestion[];
   topSuggestion?: Suggestion;
@@ -579,7 +1130,25 @@ function BookingTab({
   setDuration: (duration: number) => void;
   changeTeam: (teamId: string) => void;
   selectSuggestion: (suggestion: Suggestion) => void;
+  openTeamTab: () => void;
 }) {
+  if (!selectedTeam) {
+    return (
+      <div className="space-y-3">
+        <MobilePanel>
+          <p className="text-xs font-semibold text-[#ef6351]">팀 필요</p>
+          <h3 className="mt-1 text-2xl font-semibold">예약할 팀을 먼저 만들어 주세요</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            승인된 부원 목록에서 팀장과 멤버를 선택한 뒤 세션을 지정하면 추천 시간이 계산됩니다.
+          </p>
+        </MobilePanel>
+        <button type="button" onClick={openTeamTab} className="h-12 w-full rounded-lg bg-slate-950 text-sm font-semibold text-white">
+          팀 만들기
+        </button>
+      </div>
+    );
+  }
+
   const leader = selectedTeam.members.find((member) => member.id === selectedTeam.leaderId);
 
   return (
@@ -665,6 +1234,7 @@ function BookingTab({
           {suggestions.slice(0, 3).map((suggestion) => (
             <SuggestionMiniRow key={`${suggestion.day}-${suggestion.start}`} suggestion={suggestion} onSelect={selectSuggestion} />
           ))}
+          {suggestions.length === 0 && <EmptyText text="예약 가능한 시간이 없습니다." />}
         </div>
       </MobilePanel>
     </div>
@@ -679,13 +1249,17 @@ function SuggestionsTab({
   hasAllIn,
   onSelect,
 }: {
-  selectedTeam: Team;
+  selectedTeam: Team | null;
   suggestions: Suggestion[];
   draft: Suggestion | null;
   duration: number;
   hasAllIn: boolean;
   onSelect: (suggestion: Suggestion) => void;
 }) {
+  if (!selectedTeam) {
+    return <EmptyState title="추천할 팀이 없습니다" body="팀 탭에서 먼저 팀을 만들어 주세요." />;
+  }
+
   return (
     <div className="space-y-3">
       <MobilePanel>
@@ -743,33 +1317,29 @@ function SuggestionsTab({
             </button>
           );
         })}
+        {suggestions.length === 0 && <EmptyText text="예약 가능한 시간이 없습니다." />}
       </div>
     </div>
   );
 }
 
 function MyPageTab({
-  teams,
+  profile,
   selectedTeam,
-  selectedMember,
-  selectedMemberId,
+  teams,
+  ownBusy,
   changeTeam,
-  setSelectedMemberId,
-  busy,
   toggleBusy,
 }: {
+  profile: Profile;
+  selectedTeam: Team | null;
   teams: Team[];
-  selectedTeam: Team;
-  selectedMember: Member;
-  selectedMemberId: string;
+  ownBusy: string[];
   changeTeam: (teamId: string) => void;
-  setSelectedMemberId: (memberId: string) => void;
-  busy: Record<string, string[]>;
   toggleBusy: (day: Day, time: string) => void;
 }) {
-  const leaderId = selectedTeam.leaderId;
-  const busyCount = busy[selectedMember.id]?.length ?? 0;
-  const isLeader = selectedMember.id === leaderId;
+  const memberRole = selectedTeam?.members.find((member) => member.id === profile.id)?.role ?? "보컬";
+  const busyCount = ownBusy.length;
 
   return (
     <div className="space-y-3">
@@ -777,131 +1347,106 @@ function MyPageTab({
         <p className="text-xs font-semibold text-[#ef6351]">마이페이지</p>
         <div className="mt-2 flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-2xl font-semibold">{selectedMember.name}</h3>
+            <h3 className="text-2xl font-semibold">{profile.name}</h3>
             <p className="mt-1 text-sm text-slate-500">
-              {selectedTeam.name} · {selectedMember.role}
+              {profile.cohort} · {profile.student_no}
             </p>
           </div>
           <span className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs font-semibold text-[#be3d33]">
-            {isLeader ? "팀장" : "멤버"}
+            {profile.role === "admin" ? "관리자" : "부원"}
           </span>
         </div>
         <div className="mt-4 grid grid-cols-3 gap-2">
-          <ProfileStat label="소속 팀" value={selectedTeam.name} />
-          <ProfileStat label="내 세션" value={selectedMember.role} />
+          <ProfileStat label="소속 팀" value={selectedTeam?.name ?? "없음"} />
+          <ProfileStat label="내 세션" value={selectedTeam ? memberRole : "미정"} />
           <ProfileStat label="불가 시간" value={`${busyCount}개`} />
         </div>
       </MobilePanel>
 
-      <MobilePanel title="내 팀 선택">
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {teams.map((team) => (
-            <button
-              key={team.id}
-              type="button"
-              onClick={() => changeTeam(team.id)}
-              className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs font-semibold ${
-                selectedTeam.id === team.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
-              }`}
-            >
-              {team.name}
-            </button>
-          ))}
-        </div>
-      </MobilePanel>
-
-      <MobilePanel title="내 프로필 선택">
-        <p className="mb-3 text-xs leading-5 text-slate-500">
-          공모전 프로토타입에서는 로그인 대신 팀원 중 내 프로필을 선택해 시간표를 수정합니다.
-        </p>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {selectedTeam.members.map((member) => (
-            <button
-              key={member.id}
-              type="button"
-              onClick={() => setSelectedMemberId(member.id)}
-              className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs ${
-                selectedMemberId === member.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
-              }`}
-            >
-              <span className="block font-semibold">
-                {member.name}
-                {member.id === leaderId ? " 팀장" : ""}
-              </span>
-              <span className={selectedMemberId === member.id ? "text-slate-300" : "text-slate-500"}>{member.role}</span>
-            </button>
-          ))}
-        </div>
-      </MobilePanel>
+      {teams.length > 0 && (
+        <MobilePanel title="내 팀 선택">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {teams.map((team) => (
+              <button
+                key={team.id}
+                type="button"
+                onClick={() => changeTeam(team.id)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs font-semibold ${
+                  selectedTeam?.id === team.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
+                }`}
+              >
+                {team.name}
+              </button>
+            ))}
+          </div>
+        </MobilePanel>
+      )}
 
       <MobilePanel title="내 시간표 편집">
         <p className="mb-3 text-xs leading-5 text-slate-500">
-          불가능한 시간을 누르면 AI 추천 시간이 바로 다시 계산됩니다.
+          불가능한 시간을 누르면 추천 시간이 바로 다시 계산됩니다.
         </p>
-        <div className="grid grid-cols-[44px_repeat(6,minmax(38px,1fr))] gap-1">
-          <div />
-          {days.map((day) => (
-            <div key={day} className="flex h-8 items-center justify-center text-xs font-semibold text-slate-500">
-              {day}
-            </div>
-          ))}
-          {timeSlots.map((time) => (
-            <MemberScheduleRow
-              key={time}
-              time={time}
-              busy={busy[selectedMember.id] ?? []}
-              onToggle={toggleBusy}
-            />
-          ))}
-        </div>
+        <ScheduleGrid busy={ownBusy} onToggle={toggleBusy} />
       </MobilePanel>
     </div>
   );
 }
 
-function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: NewTeamPayload) => void }) {
+function TeamTab({
+  teams,
+  approvedProfiles,
+  onAddTeam,
+  currentUserId,
+}: {
+  teams: Team[];
+  approvedProfiles: Profile[];
+  onAddTeam: (payload: NewTeamPayload) => Promise<void>;
+  currentUserId: string;
+}) {
   const [teamName, setTeamName] = useState("");
   const [song, setSong] = useState("");
-  const [leaderName, setLeaderName] = useState("");
-  const [leaderRole, setLeaderRole] = useState<Session>("보컬");
-  const [memberName, setMemberName] = useState("");
-  const [memberRole, setMemberRole] = useState<Session>("리드기타");
-  const [members, setMembers] = useState<MemberDraft[]>([]);
-  const [message, setMessage] = useState("팀장과 멤버의 세션을 지정해 새 팀을 만들 수 있어요.");
+  const [leaderId, setLeaderId] = useState(currentUserId);
+  const [leaderRole, setLeaderRole] = useState<SessionRole>("보컬");
+  const [memberId, setMemberId] = useState(currentUserId);
+  const [memberRole, setMemberRole] = useState<SessionRole>("리드기타");
+  const [members, setMembers] = useState<TeamMemberDraft[]>([]);
+  const [message, setMessage] = useState("승인된 부원을 선택해 새 팀을 만들 수 있어요.");
+
+  const effectiveLeaderId = approvedProfiles.some((item) => item.id === leaderId) ? leaderId : approvedProfiles[0]?.id ?? "";
+  const effectiveMemberId = approvedProfiles.some((item) => item.id === memberId) ? memberId : approvedProfiles[0]?.id ?? "";
+  const leader = approvedProfiles.find((item) => item.id === effectiveLeaderId);
 
   function addMemberDraft() {
-    const trimmedName = memberName.trim();
-    if (!trimmedName) {
-      setMessage("추가할 멤버 이름을 입력해 주세요.");
+    const target = approvedProfiles.find((item) => item.id === effectiveMemberId);
+    if (!target) {
+      setMessage("추가할 부원을 선택해 주세요.");
       return;
     }
-    setMembers((current) => [
-      ...current,
-      {
-        id: makeId("draft", trimmedName),
-        name: trimmedName,
-        role: memberRole,
-      },
-    ]);
-    setMemberName("");
-    setMemberRole("리드기타");
-    setMessage(`${trimmedName} 멤버가 추가 목록에 들어갔어요.`);
+    if (target.id === effectiveLeaderId) {
+      setMessage("팀장은 자동으로 멤버에 포함됩니다.");
+      return;
+    }
+    if (members.some((member) => member.userId === target.id)) {
+      setMessage("이미 추가한 멤버입니다.");
+      return;
+    }
+
+    setMembers((current) => [...current, { userId: target.id, name: target.name, role: memberRole }]);
+    setMessage(`${target.name} 멤버를 추가했어요.`);
   }
 
-  function removeDraft(id: string) {
-    setMembers((current) => current.filter((member) => member.id !== id));
+  function removeDraft(userId: string) {
+    setMembers((current) => current.filter((member) => member.userId !== userId));
   }
 
-  function submitTeam() {
+  async function submitTeam() {
     const trimmedTeamName = teamName.trim();
-    const trimmedLeaderName = leaderName.trim();
-
     if (!trimmedTeamName) {
       setMessage("팀 이름을 먼저 입력해 주세요.");
       return;
     }
-    if (!trimmedLeaderName) {
-      setMessage("팀장을 맡을 멤버 이름을 입력해 주세요.");
+    if (!leader) {
+      setMessage("팀장을 선택해 주세요.");
       return;
     }
     if (teams.some((team) => team.name.toLowerCase() === trimmedTeamName.toLowerCase())) {
@@ -909,19 +1454,17 @@ function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: New
       return;
     }
 
-    onAddTeam({
+    await onAddTeam({
       teamName: trimmedTeamName,
       song,
-      leaderName: trimmedLeaderName,
+      leaderId: effectiveLeaderId,
       leaderRole,
       members,
     });
     setTeamName("");
     setSong("");
-    setLeaderName("");
-    setLeaderRole("보컬");
     setMembers([]);
-    setMessage("팀이 추가됐어요. 예약 화면에서 바로 확인할 수 있습니다.");
+    setMessage("팀 등록 요청을 보냈어요.");
   }
 
   return (
@@ -930,7 +1473,7 @@ function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: New
         <p className="text-xs font-semibold text-[#ef6351]">팀 추가</p>
         <h3 className="mt-1 text-xl font-semibold">새 합주 팀 만들기</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          팀장을 먼저 정하고, 멤버를 추가하면서 각 멤버의 세션을 지정합니다.
+          승인된 부원 중 팀장과 멤버를 선택하고, 각 멤버의 세션을 지정합니다.
         </p>
         <p className="mt-3 rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">{message}</p>
       </MobilePanel>
@@ -944,14 +1487,14 @@ function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: New
 
       <MobilePanel title="팀장 지정">
         <div className="space-y-3">
-          <LabeledInput label="팀장 이름" value={leaderName} onChange={setLeaderName} placeholder="팀장 이름" />
+          <ProfileSelect label="팀장" value={effectiveLeaderId} onChange={setLeaderId} profiles={approvedProfiles} />
           <SessionSelect label="팀장 세션" value={leaderRole} onChange={setLeaderRole} />
         </div>
       </MobilePanel>
 
       <MobilePanel title="멤버 추가">
         <div className="space-y-3">
-          <LabeledInput label="멤버 이름" value={memberName} onChange={setMemberName} placeholder="멤버 이름" />
+          <ProfileSelect label="멤버" value={effectiveMemberId} onChange={setMemberId} profiles={approvedProfiles} />
           <SessionSelect label="멤버 세션" value={memberRole} onChange={setMemberRole} />
           <button
             type="button"
@@ -964,19 +1507,17 @@ function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: New
 
         <div className="mt-4 space-y-2">
           {members.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-[#f0ded7] bg-white p-3 text-xs leading-5 text-slate-500">
-              추가 멤버가 없으면 팀장 1명만 있는 팀으로도 만들 수 있어요.
-            </p>
+            <EmptyText text="추가 멤버가 없으면 팀장 1명만 있는 팀으로도 만들 수 있어요." />
           ) : (
             members.map((member) => (
-              <div key={member.id} className="flex items-center justify-between rounded-lg border border-[#f0ded7] bg-white p-3">
+              <div key={member.userId} className="flex items-center justify-between rounded-lg border border-[#f0ded7] bg-white p-3">
                 <div>
                   <p className="text-sm font-semibold">{member.name}</p>
                   <p className="mt-1 text-xs text-slate-500">{member.role}</p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => removeDraft(member.id)}
+                  onClick={() => removeDraft(member.userId)}
                   className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600"
                 >
                   삭제
@@ -998,7 +1539,7 @@ function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: New
       <MobilePanel title="등록된 팀">
         <div className="space-y-2">
           {teams.map((team) => {
-            const leader = team.members.find((member) => member.id === team.leaderId);
+            const leaderProfile = team.members.find((member) => member.id === team.leaderId);
 
             return (
               <div key={team.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
@@ -1010,7 +1551,7 @@ function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: New
                   <span className={`h-3 w-3 rounded-sm ${team.color}`} />
                 </div>
                 <p className="mt-2 text-xs font-semibold text-[#be3d33]">
-                  팀장 {leader?.name ?? "-"} · {leader?.role ?? "-"}
+                  팀장 {leaderProfile?.name ?? "-"} · {leaderProfile?.role ?? "-"}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {team.members.map((member) => (
@@ -1022,6 +1563,156 @@ function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: New
               </div>
             );
           })}
+          {teams.length === 0 && <EmptyText text="아직 등록된 팀이 없습니다." />}
+        </div>
+      </MobilePanel>
+    </div>
+  );
+}
+
+function AdminTab({
+  pendingProfiles,
+  approvedProfiles,
+  reservations,
+  newsItems,
+  busyByUser,
+  approveProfile,
+  addNews,
+  deleteNews,
+  cancelBooking,
+  toggleSchedule,
+}: {
+  pendingProfiles: Profile[];
+  approvedProfiles: Profile[];
+  reservations: Reservation[];
+  newsItems: NewsItem[];
+  busyByUser: Record<string, string[]>;
+  approveProfile: (profileId: string, nextStatus: "approved" | "rejected") => Promise<void>;
+  addNews: (payload: { title: string; body: string; tag: string }) => Promise<void>;
+  deleteNews: (newsId: string) => Promise<void>;
+  cancelBooking: (bookingId: string, reason: string) => Promise<void>;
+  toggleSchedule: (userId: string, day: Day, time: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [tag, setTag] = useState("공지");
+  const [selectedUserId, setSelectedUserId] = useState("");
+
+  const effectiveSelectedUserId = approvedProfiles.some((item) => item.id === selectedUserId) ? selectedUserId : approvedProfiles[0]?.id ?? "";
+  const selectedProfile = approvedProfiles.find((item) => item.id === effectiveSelectedUserId);
+
+  async function submitNews() {
+    if (!title.trim() || !body.trim()) {
+      return;
+    }
+
+    await addNews({ title: title.trim(), body: body.trim(), tag: tag.trim() || "공지" });
+    setTitle("");
+    setBody("");
+    setTag("공지");
+  }
+
+  return (
+    <div className="space-y-3">
+      <MobilePanel>
+        <p className="text-xs font-semibold text-[#ef6351]">관리자</p>
+        <h3 className="mt-1 text-xl font-semibold">승인과 운영 관리</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          가입 승인, 소식 작성, 예약 취소, 부원 시간표 수정을 처리합니다.
+        </p>
+      </MobilePanel>
+
+      <MobilePanel title="가입 승인">
+        <div className="space-y-2">
+          {pendingProfiles.map((item) => (
+            <div key={item.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">{item.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {item.cohort} · {item.student_no}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-400">{item.email}</p>
+                </div>
+                <div className="flex gap-1">
+                  <button type="button" onClick={() => approveProfile(item.id, "approved")} className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
+                    승인
+                  </button>
+                  <button type="button" onClick={() => approveProfile(item.id, "rejected")} className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                    거절
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {pendingProfiles.length === 0 && <EmptyText text="승인 대기 중인 부원이 없습니다." />}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="소식 작성">
+        <div className="space-y-3">
+          <LabeledInput label="태그" value={tag} onChange={setTag} placeholder="공지" />
+          <LabeledInput label="제목" value={title} onChange={setTitle} placeholder="소식 제목" />
+          <LabeledTextarea label="내용" value={body} onChange={setBody} placeholder="소식 내용을 입력하세요." />
+          <button type="button" onClick={submitNews} className="h-10 w-full rounded-lg bg-slate-950 text-sm font-semibold text-white">
+            소식 올리기
+          </button>
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="소식 관리">
+        <div className="space-y-2">
+          {newsItems.map((item) => (
+            <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0ded7] bg-white p-3">
+              <div>
+                <p className="text-sm font-semibold">{item.title}</p>
+                <p className="mt-1 text-xs text-slate-500">{item.tag}</p>
+              </div>
+              <button type="button" onClick={() => deleteNews(item.id)} className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                삭제
+              </button>
+            </div>
+          ))}
+          {newsItems.length === 0 && <EmptyText text="등록된 소식이 없습니다." />}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="예약 취소">
+        <div className="space-y-2">
+          {reservations.map((reservation) => (
+            <div key={reservation.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0ded7] bg-white p-3">
+              <div>
+                <p className="text-sm font-semibold">{reservation.teamName}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {reservation.day} {reservation.start} · {reservation.duration}시간
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => cancelBooking(reservation.id, "관리자 취소")}
+                className="rounded-md bg-[#fff0eb] px-2 py-1 text-xs font-semibold text-[#be3d33]"
+              >
+                취소
+              </button>
+            </div>
+          ))}
+          {reservations.length === 0 && <EmptyText text="확정된 예약이 없습니다." />}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="부원 시간표 수정">
+        <div className="space-y-3">
+          <ProfileSelect label="부원" value={effectiveSelectedUserId} onChange={setSelectedUserId} profiles={approvedProfiles} />
+          {selectedProfile ? (
+            <>
+              <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">
+                {selectedProfile.name} 부원의 불가 시간을 관리자 권한으로 수정합니다.
+              </p>
+              <ScheduleGrid busy={busyByUser[selectedProfile.id] ?? []} onToggle={(day, time) => toggleSchedule(selectedProfile.id, day, time)} />
+            </>
+          ) : (
+            <EmptyText text="승인된 부원이 없습니다." />
+          )}
         </div>
       </MobilePanel>
     </div>
@@ -1029,6 +1720,33 @@ function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: New
 }
 
 function LabeledInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  type?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
+      />
+    </label>
+  );
+}
+
+function LabeledTextarea({
   label,
   value,
   onChange,
@@ -1042,11 +1760,11 @@ function LabeledInput({
   return (
     <label className="block">
       <span className="text-xs font-semibold text-slate-500">{label}</span>
-      <input
+      <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
+        className="mt-2 min-h-24 w-full resize-none rounded-lg border border-[#f0ded7] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#ff665a]"
       />
     </label>
   );
@@ -1058,15 +1776,15 @@ function SessionSelect({
   onChange,
 }: {
   label: string;
-  value: Session;
-  onChange: (value: Session) => void;
+  value: SessionRole;
+  onChange: (value: SessionRole) => void;
 }) {
   return (
     <label className="block">
       <span className="text-xs font-semibold text-slate-500">{label}</span>
       <select
         value={value}
-        onChange={(event) => onChange(event.target.value as Session)}
+        onChange={(event) => onChange(event.target.value as SessionRole)}
         className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
       >
         {sessionOptions.map((session) => (
@@ -1079,11 +1797,40 @@ function SessionSelect({
   );
 }
 
+function ProfileSelect({
+  label,
+  value,
+  onChange,
+  profiles,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  profiles: Profile[];
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
+      >
+        {profiles.map((profile) => (
+          <option key={profile.id} value={profile.id}>
+            {profile.name} · {profile.cohort}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function NewsTab({
   newsItems,
   reservations,
 }: {
-  newsItems: Array<{ title: string; body: string; tag: string }>;
+  newsItems: NewsItem[];
   reservations: Reservation[];
 }) {
   return (
@@ -1091,7 +1838,7 @@ function NewsTab({
       <MobilePanel title="동아리 소식">
         <div className="space-y-2">
           {newsItems.map((item) => (
-            <article key={item.title} className="rounded-lg border border-[#f0ded7] bg-white p-3">
+            <article key={item.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
               <div className="flex items-center gap-2">
                 <span className="rounded-md bg-slate-950 px-2 py-1 text-[11px] font-semibold text-white">{item.tag}</span>
                 <h3 className="text-sm font-semibold">{item.title}</h3>
@@ -1099,6 +1846,7 @@ function NewsTab({
               <p className="mt-2 text-sm leading-6 text-slate-600">{item.body}</p>
             </article>
           ))}
+          {newsItems.length === 0 && <EmptyText text="아직 올라온 소식이 없습니다." />}
         </div>
       </MobilePanel>
 
@@ -1117,13 +1865,14 @@ function NewsTab({
               </p>
             </div>
           ))}
+          {reservations.length === 0 && <EmptyText text="다가오는 예약이 없습니다." />}
         </div>
       </MobilePanel>
     </div>
   );
 }
 
-function MobilePanel({ title, children }: { title?: string; children: React.ReactNode }) {
+function MobilePanel({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <section className="rounded-lg border border-[#f0ded7] bg-white/88 p-4 shadow-sm">
       {title && <h3 className="mb-3 text-sm font-semibold text-slate-900">{title}</h3>}
@@ -1208,6 +1957,28 @@ function SuggestionMiniRow({
   );
 }
 
+function ScheduleGrid({
+  busy,
+  onToggle,
+}: {
+  busy: string[];
+  onToggle: (day: Day, time: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-[44px_repeat(6,minmax(38px,1fr))] gap-1">
+      <div />
+      {days.map((day) => (
+        <div key={day} className="flex h-8 items-center justify-center text-xs font-semibold text-slate-500">
+          {day}
+        </div>
+      ))}
+      {timeSlots.map((time) => (
+        <MemberScheduleRow key={time} time={time} busy={busy} onToggle={onToggle} />
+      ))}
+    </div>
+  );
+}
+
 function MemberScheduleRow({
   time,
   busy,
@@ -1241,5 +2012,22 @@ function MemberScheduleRow({
         );
       })}
     </>
+  );
+}
+
+function EmptyText({ text }: { text: string }) {
+  return (
+    <p className="rounded-lg border border-dashed border-[#f0ded7] bg-white p-3 text-xs leading-5 text-slate-500">
+      {text}
+    </p>
+  );
+}
+
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <MobilePanel>
+      <h3 className="text-xl font-semibold">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
+    </MobilePanel>
   );
 }
