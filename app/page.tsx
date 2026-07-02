@@ -948,7 +948,7 @@ export default function Home() {
   if (isBooting) {
     return (
       <PhoneShell>
-        <CenteredMessage title="BandRoom AI" body="계정 상태를 확인하고 있어요." />
+        <CenteredMessage title="Andante" body="계정 상태를 확인하고 있어요." />
       </PhoneShell>
     );
   }
@@ -1091,7 +1091,7 @@ function CenteredMessage({ title, body }: { title: string; body: string }) {
   return (
     <div className="flex min-h-full items-center justify-center">
       <div className="w-full rounded-lg border border-[#f0ded7] bg-white p-5 text-center">
-        <p className="text-xs font-semibold text-[#ef6351]">BandRoom AI</p>
+        <p className="text-xs font-semibold text-[#ef6351]">Andante</p>
         <h1 className="mt-2 text-2xl font-semibold">{title}</h1>
         <p className="mt-3 text-sm leading-6 text-slate-600">{body}</p>
       </div>
@@ -1146,7 +1146,7 @@ function AuthScreen({
   return (
     <div className="space-y-3">
       <MobilePanel>
-        <p className="text-xs font-semibold text-[#ef6351]">BandRoom AI</p>
+        <p className="text-xs font-semibold text-[#ef6351]">Andante</p>
         <h1 className="mt-2 text-2xl font-semibold">동아리방 예약 로그인</h1>
         <p className="mt-3 text-sm leading-6 text-slate-600">
           부원은 가입 신청 후 관리자 승인을 받아야 예약과 시간표 기능을 사용할 수 있습니다.
@@ -1272,8 +1272,8 @@ function AppHeader({
     <header className="shrink-0 px-4 pb-2 pt-1">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold text-[#ef6351]">BandRoom AI</p>
-          <h2 className="mt-1 text-2xl font-semibold tracking-tight">합주실 예약</h2>
+          <p className="text-xs font-semibold text-[#ef6351]">Andante</p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-tight">합주 예약</h2>
         </div>
         <button
           type="button"
@@ -1482,7 +1482,7 @@ function SuggestionsTab({
         )}
       </MobilePanel>
 
-      {!selectedTeam && <EmptyState title="예약할 수 있는 팀이 없습니다" body="팀장인 팀이 있을 때만 합주실 예약을 만들 수 있습니다." />}
+      {!selectedTeam && <EmptyState title="예약할 수 있는 팀이 없습니다" body="팀장인 팀이 있을 때만 합주 예약을 만들 수 있습니다." />}
 
       {selectedTeam && (
         <>
@@ -1808,8 +1808,8 @@ function TeamTab({
 
       <MobilePanel title="팀 정보">
         <div className="space-y-3">
-          <LabeledInput label="팀 이름" value={teamName} onChange={setTeamName} placeholder="예: Midnight Jam" />
-          <LabeledInput label="합주 목표" value={song} onChange={setSong} placeholder="예: 학교 축제 엔딩곡" />
+          <LabeledInput label="팀 이름" value={teamName} onChange={setTeamName} placeholder="곡 이름" />
+          <LabeledInput label="합주 목표" value={song} onChange={setSong} placeholder="공연 이름 (예: 대동제)" />
         </div>
       </MobilePanel>
 
