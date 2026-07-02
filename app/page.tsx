@@ -1601,7 +1601,7 @@ function SuggestionsTab({
         )}
       </MobilePanel>
 
-      {!selectedTeam && <EmptyState title="예약할 수 있는 팀이 없습니다" body="팀장인 팀이 있을 때만 합주 예약을 만들 수 있습니다." />}
+      {!selectedTeam && <EmptyState title="예약할 수 있는 팀이 없습니다" />}
 
       {selectedTeam && (
         <>
@@ -2566,11 +2566,11 @@ function EmptyText({ text }: { text: string }) {
   );
 }
 
-function EmptyState({ title, body }: { title: string; body: string }) {
+function EmptyState({ title, body }: { title: string; body?: string }) {
   return (
     <MobilePanel>
       <h3 className="text-xl font-semibold">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
+      {body && <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>}
     </MobilePanel>
   );
 }
