@@ -113,6 +113,37 @@ const colorPalette = [
 
 const emptyBusy: Record<string, string[]> = {};
 
+function readStoredAccessToken() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const keys = ["sb-inlddwyoesmvmxkcuhwd-auth-token", ...Object.keys(window.localStorage).filter((key) => key.startsWith("sb-") && key.endsWith("-auth-token"))];
+
+  for (const key of keys) {
+    try {
+      const stored = window.localStorage.getItem(key);
+      if (!stored) {
+        continue;
+      }
+
+      const parsed = JSON.parse(stored) as {
+        access_token?: string;
+        currentSession?: { access_token?: string };
+        session?: { access_token?: string };
+      };
+      const token = parsed.access_token ?? parsed.currentSession?.access_token ?? parsed.session?.access_token ?? "";
+      if (token) {
+        return token;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return "";
+}
+
 const baseTabs: Array<{ id: Tab; label: string; short: string }> = [
   { id: "booking", label: "메인", short: "홈" },
   { id: "suggestions", label: "예약", short: "R" },
@@ -844,7 +875,7 @@ export default function Home() {
   async function reserveSelectedBookingTimes() {
     if (!selectedBookingTeam) {
       setActiveTab("team");
-      setStatus("팀장인 팀만 예약할 수 있습니다. 팀 탭에서 팀을 만들거나 팀장에게 예약을 요청해 주세요.");
+      setStatus("팀장만 예약 가능합니다.");
       return;
     }
 
@@ -912,13 +943,17 @@ export default function Home() {
     await refreshData();
   }
 
+  async function getCurrentAccessToken() {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? session?.access_token ?? readStoredAccessToken();
+  }
+
   async function deleteMemberAccount(profileId: string) {
     if (!profile || profile.role !== "admin") {
       return;
     }
 
-    const { data } = await supabase.auth.getSession();
-    const accessToken = data.session?.access_token;
+    const accessToken = await getCurrentAccessToken();
     if (!accessToken) {
       setStatus("관리자 로그인이 필요합니다.");
       return;
@@ -930,7 +965,7 @@ export default function Home() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ profileId }),
+      body: JSON.stringify({ profileId, accessToken }),
     });
 
     const result = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -948,8 +983,7 @@ export default function Home() {
       return;
     }
 
-    const { data } = await supabase.auth.getSession();
-    const accessToken = data.session?.access_token;
+    const accessToken = await getCurrentAccessToken();
     if (!accessToken) {
       setStatus("관리자 로그인이 필요합니다.");
       return;
@@ -961,7 +995,7 @@ export default function Home() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ teamIds }),
+      body: JSON.stringify({ teamIds, accessToken }),
     });
 
     const result = (await response.json().catch(() => null)) as { error?: string; deletedCount?: number } | null;
@@ -1529,7 +1563,7 @@ function SuggestionsTab({
             ))}
           </div>
         ) : (
-          <EmptyText text="팀장인 팀만 예약할 수 있습니다. 팀 탭에서 팀을 만들거나 팀장에게 예약을 요청해 주세요." />
+          <EmptyText text="팀장만 예약 가능합니다." />
         )}
       </MobilePanel>
 

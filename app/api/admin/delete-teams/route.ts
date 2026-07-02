@@ -21,13 +21,15 @@ export async function POST(request: Request) {
     return jsonError("SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다.", 500);
   }
 
+  const body = (await request.json().catch(() => null)) as { teamIds?: unknown; accessToken?: unknown } | null;
   const authorization = request.headers.get("authorization") ?? "";
-  const accessToken = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+  const headerAccessToken = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+  const bodyAccessToken = typeof body?.accessToken === "string" ? body.accessToken : "";
+  const accessToken = headerAccessToken || bodyAccessToken;
   if (!accessToken) {
     return jsonError("관리자 로그인이 필요합니다.", 401);
   }
 
-  const body = (await request.json().catch(() => null)) as { teamIds?: unknown } | null;
   const teamIds = Array.isArray(body?.teamIds)
     ? Array.from(new Set(body.teamIds.filter((teamId): teamId is string => typeof teamId === "string" && teamId.length > 0)))
     : [];
