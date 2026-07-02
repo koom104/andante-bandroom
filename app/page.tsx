@@ -661,6 +661,8 @@ export default function Home() {
       const dateCompare = reservationDisplayDate(a).localeCompare(reservationDisplayDate(b));
       return dateCompare || timeToMinutes(a.start) - timeToMinutes(b.start);
     });
+  const ownTeamIds = new Set(teams.filter((team) => team.members.some((member) => member.id === profile?.id)).map((team) => team.id));
+  const ownTeamReservations = upcomingReservations.filter((reservation) => ownTeamIds.has(reservation.teamId));
 
   async function signIn(email: string, password: string) {
     setAuthNotice("");
@@ -1000,6 +1002,7 @@ export default function Home() {
                   <BookingTab
                     selectedTeam={selectedTeam}
                     reservations={upcomingReservations}
+                    ownTeamReservations={ownTeamReservations}
                     reservationDates={reservationDates}
                     openTeamTab={() => setActiveTab("team")}
                     currentUserId={profile.id}
@@ -1292,6 +1295,7 @@ function AppHeader({
 function BookingTab({
   selectedTeam,
   reservations,
+  ownTeamReservations,
   reservationDates,
   openTeamTab,
   currentUserId,
@@ -1299,6 +1303,7 @@ function BookingTab({
 }: {
   selectedTeam: Team | null;
   reservations: Reservation[];
+  ownTeamReservations: Reservation[];
   reservationDates: string[];
   openTeamTab: () => void;
   currentUserId: string;
@@ -1335,7 +1340,7 @@ function BookingTab({
     <div className="space-y-3">
       <MobilePanel title="합주 일정">
         <div className="space-y-2">
-          {reservations.map((reservation) => {
+          {ownTeamReservations.map((reservation) => {
             const date = reservationDisplayDate(reservation);
 
             return (
@@ -1356,7 +1361,7 @@ function BookingTab({
               </div>
             );
           })}
-          {reservations.length === 0 && <EmptyText text="앞으로 잡힌 합주가 없습니다." />}
+          {ownTeamReservations.length === 0 && <EmptyText text="내 팀의 예정된 합주가 없습니다." />}
         </div>
       </MobilePanel>
 
@@ -1733,12 +1738,14 @@ function TeamTab({
   const [members, setMembers] = useState<TeamMemberDraft[]>([]);
   const [message, setMessage] = useState("승인된 부원을 선택해 새 팀을 만들 수 있어요.");
 
-  const leader = approvedProfiles.find((item) => item.id === currentUserId);
-  const availableMemberProfiles = approvedProfiles.filter((item) => item.id !== currentUserId);
+  const currentProfile = approvedProfiles.find((item) => item.id === currentUserId);
+  const teamEligibleProfiles = approvedProfiles.filter((item) => item.role !== "admin");
+  const leader = teamEligibleProfiles.find((item) => item.id === currentUserId);
+  const availableMemberProfiles = teamEligibleProfiles.filter((item) => item.id !== currentUserId);
   const effectiveMemberId = availableMemberProfiles.some((item) => item.id === memberId) ? memberId : availableMemberProfiles[0]?.id ?? "";
 
   function addMemberDraft() {
-    const target = approvedProfiles.find((item) => item.id === effectiveMemberId);
+    const target = availableMemberProfiles.find((item) => item.id === effectiveMemberId);
     if (!target) {
       setMessage("추가할 부원을 선택해 주세요.");
       return;
@@ -1763,7 +1770,11 @@ function TeamTab({
       return;
     }
     if (!leader) {
-      setMessage("내 계정 정보를 불러온 뒤 다시 시도해 주세요.");
+      setMessage(
+        currentProfile?.role === "admin"
+          ? "관리자 계정은 팀장이나 멤버로 추가할 수 없습니다."
+          : "내 계정 정보를 불러온 뒤 다시 시도해 주세요.",
+      );
       return;
     }
     if (teams.some((team) => team.name.toLowerCase() === trimmedTeamName.toLowerCase())) {
@@ -1807,7 +1818,11 @@ function TeamTab({
           <div>
             <p className="text-xs font-semibold text-slate-500">팀장</p>
             <div className="mt-2 rounded-lg border border-[#f0ded7] bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-950">
-              {leader ? `${leader.name} · ${leader.cohort}` : "내 계정"}
+              {leader
+                ? `${leader.name} · ${leader.cohort}`
+                : currentProfile?.role === "admin"
+                  ? "관리자 계정은 팀에 추가할 수 없습니다"
+                  : "내 계정"}
             </div>
           </div>
           <SessionSelect label="팀장 세션" value={leaderRole} onChange={setLeaderRole} />

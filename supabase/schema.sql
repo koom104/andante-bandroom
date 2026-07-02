@@ -243,8 +243,12 @@ begin
     raise exception '승인된 사용자만 팀을 만들 수 있습니다.';
   end if;
 
-  if not exists (select 1 from public.profiles where id = p_leader_id and status = 'approved') then
-    raise exception '승인된 팀장을 선택해 주세요.';
+  if p_leader_id <> auth.uid() then
+    raise exception '팀장은 본인 계정만 지정할 수 있습니다.';
+  end if;
+
+  if not exists (select 1 from public.profiles where id = p_leader_id and status = 'approved' and role <> 'admin') then
+    raise exception '승인된 일반 부원만 팀장으로 지정할 수 있습니다.';
   end if;
 
   insert into public.teams (name, song, color_index, created_by)
@@ -271,8 +275,8 @@ begin
     select *
     from jsonb_to_recordset(p_members) as x(user_id uuid, session text, is_leader boolean)
   loop
-    if not exists (select 1 from public.profiles where id = member_row.user_id and status = 'approved') then
-      raise exception '승인되지 않은 사용자는 팀에 추가할 수 없습니다.';
+    if not exists (select 1 from public.profiles where id = member_row.user_id and status = 'approved' and role <> 'admin') then
+      raise exception '승인된 일반 부원만 팀에 추가할 수 있습니다.';
     end if;
 
     insert into public.team_members (team_id, user_id, session, is_leader)
