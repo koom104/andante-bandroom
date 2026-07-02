@@ -589,8 +589,11 @@ export default function Home() {
       }
     });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+      if (event === "SIGNED_IN") {
+        setActiveTab("booking");
+      }
       if (!nextSession) {
         setProfile(null);
         setTeams([]);
@@ -674,6 +677,7 @@ export default function Home() {
     }
 
     setAuthNotice("로그인했습니다.");
+    setActiveTab("booking");
   }
 
   async function signUp(payload: {
@@ -939,6 +943,37 @@ export default function Home() {
     await refreshData();
   }
 
+  async function deleteTeams(teamIds: string[]) {
+    if (!profile || profile.role !== "admin" || teamIds.length === 0) {
+      return;
+    }
+
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (!accessToken) {
+      setStatus("관리자 로그인이 필요합니다.");
+      return;
+    }
+
+    const response = await fetch("/api/admin/delete-teams", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ teamIds }),
+    });
+
+    const result = (await response.json().catch(() => null)) as { error?: string; deletedCount?: number } | null;
+    if (!response.ok) {
+      setStatus(result?.error ?? "팀 삭제에 실패했습니다.");
+      return;
+    }
+
+    setStatus(`${result?.deletedCount ?? teamIds.length}개 팀을 삭제했어요.`);
+    await refreshData();
+  }
+
   async function cancelBooking(bookingId: string, reason: string) {
     if (!profile) {
       return;
@@ -1072,11 +1107,13 @@ export default function Home() {
                   <AdminTab
                     pendingProfiles={pendingProfiles}
                     approvedProfiles={approvedProfiles}
+                    teams={teams}
                     reservations={upcomingReservations}
                     busyByUser={busyByUser}
                     rehearsalByUser={rehearsalByUser}
                     approveProfile={approveProfile}
                     deleteMemberAccount={deleteMemberAccount}
+                    deleteTeams={deleteTeams}
                     cancelBooking={cancelBooking}
                     toggleSchedule={toggleSchedule}
                   />
@@ -1500,14 +1537,6 @@ function SuggestionsTab({
 
       {selectedTeam && (
         <>
-      <MobilePanel>
-        <p className="text-xs font-semibold text-[#ef6351]">합주 예약</p>
-        <h3 className="mt-1 text-2xl font-semibold">{formatDateLabel(selectedDate)}</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
-          {selectedTeam.name} 팀 기준으로 예약 가능한 30분 단위 시간대를 표시합니다.
-        </p>
-      </MobilePanel>
-
       <MobilePanel title="날짜 선택">
         <label className="block">
           <span className="text-xs font-semibold text-slate-500">예약 날짜</span>
@@ -1925,32 +1954,39 @@ function TeamTab({
 function AdminTab({
   pendingProfiles,
   approvedProfiles,
+  teams,
   reservations,
   busyByUser,
   rehearsalByUser,
   approveProfile,
   deleteMemberAccount,
+  deleteTeams,
   cancelBooking,
   toggleSchedule,
 }: {
   pendingProfiles: Profile[];
   approvedProfiles: Profile[];
+  teams: Team[];
   reservations: Reservation[];
   busyByUser: Record<string, string[]>;
   rehearsalByUser: Record<string, string[]>;
   approveProfile: (profileId: string, nextStatus: "approved" | "rejected") => Promise<void>;
   deleteMemberAccount: (profileId: string) => Promise<void>;
+  deleteTeams: (teamIds: string[]) => Promise<void>;
   cancelBooking: (bookingId: string, reason: string) => Promise<void>;
   toggleSchedule: (userId: string, day: Day, time: string) => Promise<void>;
 }) {
   const [selectedUserId, setSelectedUserId] = useState("");
   const [deleteUserId, setDeleteUserId] = useState("");
+  const [deleteTeamId, setDeleteTeamId] = useState("");
 
   const effectiveSelectedUserId = approvedProfiles.some((item) => item.id === selectedUserId) ? selectedUserId : approvedProfiles[0]?.id ?? "";
   const selectedProfile = approvedProfiles.find((item) => item.id === effectiveSelectedUserId);
   const deletableProfiles = approvedProfiles.filter((item) => item.role !== "admin");
   const effectiveDeleteUserId = deletableProfiles.some((item) => item.id === deleteUserId) ? deleteUserId : deletableProfiles[0]?.id ?? "";
   const deleteProfile = deletableProfiles.find((item) => item.id === effectiveDeleteUserId);
+  const effectiveDeleteTeamId = teams.some((team) => team.id === deleteTeamId) ? deleteTeamId : teams[0]?.id ?? "";
+  const deleteTeam = teams.find((team) => team.id === effectiveDeleteTeamId);
 
   async function submitDeleteMemberAccount() {
     if (!deleteProfile) {
@@ -1969,6 +2005,44 @@ function AdminTab({
 
     await deleteMemberAccount(deleteProfile.id);
     setDeleteUserId("");
+  }
+
+  async function submitDeleteTeam() {
+    if (!deleteTeam) {
+      return;
+    }
+
+    const firstConfirm = window.confirm(`${deleteTeam.name} 팀을 삭제할까요?`);
+    if (!firstConfirm) {
+      return;
+    }
+
+    const secondConfirm = window.confirm("정말 삭제할까요? 이 팀의 예약과 멤버 정보도 함께 삭제됩니다.");
+    if (!secondConfirm) {
+      return;
+    }
+
+    await deleteTeams([deleteTeam.id]);
+    setDeleteTeamId("");
+  }
+
+  async function submitDeleteAllTeams() {
+    if (teams.length === 0) {
+      return;
+    }
+
+    const firstConfirm = window.confirm(`등록된 ${teams.length}개 팀을 모두 삭제할까요?`);
+    if (!firstConfirm) {
+      return;
+    }
+
+    const secondConfirm = window.confirm("정말 모든 팀을 삭제할까요? 모든 팀 예약과 멤버 정보도 함께 삭제됩니다.");
+    if (!secondConfirm) {
+      return;
+    }
+
+    await deleteTeams(teams.map((team) => team.id));
+    setDeleteTeamId("");
   }
 
   return (
@@ -2029,6 +2103,27 @@ function AdminTab({
             </div>
           ))}
           {reservations.length === 0 && <EmptyText text="확정된 예약이 없습니다." />}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="팀 삭제">
+        <div className="space-y-3">
+          <TeamSelect label="팀" value={effectiveDeleteTeamId} onChange={setDeleteTeamId} teams={teams} />
+          {deleteTeam ? (
+            <>
+              <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">
+                {deleteTeam.name} 팀을 삭제하면 해당 팀의 예약과 멤버 정보도 함께 삭제됩니다.
+              </p>
+              <button type="button" onClick={submitDeleteTeam} className="h-10 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white">
+                선택한 팀 삭제
+              </button>
+              <button type="button" onClick={submitDeleteAllTeams} className="h-10 w-full rounded-lg border border-[#ff665a] bg-white text-sm font-semibold text-[#be3d33]">
+                모든 팀 일괄 삭제
+              </button>
+            </>
+          ) : (
+            <EmptyText text="삭제할 팀이 없습니다." />
+          )}
         </div>
       </MobilePanel>
 
@@ -2158,6 +2253,40 @@ function ProfileSelect({
         {profiles.map((profile) => (
           <option key={profile.id} value={profile.id}>
             {profile.name} · {profile.cohort}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function TeamSelect({
+  label,
+  value,
+  onChange,
+  teams,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  teams: Team[];
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
+      >
+        {teams.length === 0 && (
+          <option value="" disabled>
+            삭제할 팀이 없습니다
+          </option>
+        )}
+        {teams.map((team) => (
+          <option key={team.id} value={team.id}>
+            {team.name} · {team.song || "합주 목표 없음"}
           </option>
         ))}
       </select>
