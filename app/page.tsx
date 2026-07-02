@@ -1065,11 +1065,9 @@ export default function Home() {
                 {activeTab === "my" && (
                   <MyPageTab
                     profile={profile}
-                    selectedTeam={selectedTeam}
                     teams={teams}
                     ownBusy={busyByUser[profile.id] ?? []}
                     ownRehearsals={rehearsalByUser[profile.id] ?? []}
-                    changeTeam={changeTeam}
                     toggleBusy={(day, time) => toggleSchedule(profile.id, day, time)}
                   />
                 )}
@@ -1692,23 +1690,23 @@ function BookingSlotRow({
 
 function MyPageTab({
   profile,
-  selectedTeam,
   teams,
   ownBusy,
   ownRehearsals,
-  changeTeam,
   toggleBusy,
 }: {
   profile: Profile;
-  selectedTeam: Team | null;
   teams: Team[];
   ownBusy: string[];
   ownRehearsals: string[];
-  changeTeam: (teamId: string) => void;
   toggleBusy: (day: Day, time: string) => void;
 }) {
-  const memberRole = selectedTeam?.members.find((member) => member.id === profile.id)?.role ?? "보컬";
-  const busyCount = ownBusy.length;
+  const memberships = teams
+    .map((team) => {
+      const member = team.members.find((item) => item.id === profile.id);
+      return member ? { team, role: member.role } : null;
+    })
+    .filter((item): item is { team: Team; role: SessionRole } => Boolean(item));
 
   return (
     <div className="space-y-3">
@@ -1725,31 +1723,20 @@ function MyPageTab({
             {profile.role === "admin" ? "관리자" : "부원"}
           </span>
         </div>
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <ProfileStat label="소속 팀" value={selectedTeam?.name ?? "없음"} />
-          <ProfileStat label="내 세션" value={selectedTeam ? memberRole : "미정"} />
-          <ProfileStat label="불가 시간" value={formatSlotHours(busyCount)} />
-        </div>
       </MobilePanel>
 
-      {teams.length > 0 && (
-        <MobilePanel title="내 팀 선택">
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {teams.map((team) => (
-              <button
-                key={team.id}
-                type="button"
-                onClick={() => changeTeam(team.id)}
-                className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs font-semibold ${
-                  selectedTeam?.id === team.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
-                }`}
-              >
-                {team.name}
-              </button>
-            ))}
-          </div>
-        </MobilePanel>
-      )}
+      <MobilePanel title="소속 팀">
+        <div className="space-y-2">
+          {memberships.map(({ team, role }) => (
+            <div key={team.id} className="rounded-lg border border-[#f0ded7] bg-white px-3 py-3">
+              <p className="text-sm font-semibold">
+                {team.name} - {role}
+              </p>
+            </div>
+          ))}
+          {memberships.length === 0 && <EmptyText text="아직 소속된 팀이 없습니다." />}
+        </div>
+      </MobilePanel>
 
       <MobilePanel title="내 시간표 편집">
         <p className="mb-3 text-xs leading-5 text-slate-500">
