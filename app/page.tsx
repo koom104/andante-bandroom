@@ -441,17 +441,7 @@ export default function Home() {
 
   return (
     <main className="h-screen overflow-hidden bg-[#f9ebe6] px-4 py-5 text-slate-950 sm:px-6">
-      <div className="mx-auto flex h-full max-w-6xl items-center justify-center gap-10 lg:justify-between">
-        <section className="hidden max-w-md lg:block">
-          <p className="text-sm font-semibold text-[#ef6351]">BandRoom AI</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight">
-            밴드부 합주실 예약을 휴대폰 앱처럼 빠르게.
-          </h1>
-          <p className="mt-4 text-base leading-7 text-slate-600">
-            팀 생성, 팀장 지정, 세션별 멤버 관리, 시간표 추천까지 한 화면 흐름 안에 묶은 모바일 프로토타입입니다.
-          </p>
-        </section>
-
+      <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
         <section className="relative w-full max-w-[430px]">
           <div className="absolute -left-8 top-20 hidden h-28 w-28 rounded-full bg-[#ffd7cc] blur-3xl sm:block" />
           <div className="absolute -right-8 bottom-20 hidden h-32 w-32 rounded-full bg-[#ffe7a8] blur-3xl sm:block" />
