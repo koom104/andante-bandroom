@@ -376,6 +376,14 @@ function getErrorMessage(error: unknown) {
   return "알 수 없는 오류가 발생했습니다.";
 }
 
+function tryParseJson<T>(text: string) {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
 function getScheduleErrorMessage(error: unknown) {
   const message = getErrorMessage(error);
 
@@ -996,9 +1004,10 @@ export default function Home() {
       body: JSON.stringify({ profileId, accessToken, actorProfileId: profile.id }),
     });
 
-    const result = (await response.json().catch(() => null)) as { error?: string } | null;
+    const responseText = await response.text();
+    const result = tryParseJson<{ error?: string }>(responseText);
     if (!response.ok) {
-      setStatus(result?.error ?? "계정 삭제에 실패했습니다.");
+      setStatus(result?.error ?? (responseText.slice(0, 120) || "계정 삭제에 실패했습니다."));
       return;
     }
 
@@ -1022,9 +1031,10 @@ export default function Home() {
       body: JSON.stringify({ teamIds, accessToken, actorProfileId: profile.id }),
     });
 
-    const result = (await response.json().catch(() => null)) as { error?: string; deletedCount?: number } | null;
+    const responseText = await response.text();
+    const result = tryParseJson<{ error?: string; deletedCount?: number }>(responseText);
     if (!response.ok) {
-      setStatus(result?.error ?? "팀 삭제에 실패했습니다.");
+      setStatus(result?.error ?? (responseText.slice(0, 120) || "팀 삭제에 실패했습니다."));
       return;
     }
 

@@ -79,6 +79,8 @@ export async function POST(request: Request) {
     }
 
     const targetIds = targetTeams.map((team) => team.id);
+    await assertNoError(supabase.from("bookings").delete().in("team_id", targetIds), "팀 예약 삭제에 실패했습니다");
+    await assertNoError(supabase.from("team_members").delete().in("team_id", targetIds), "팀 멤버 삭제에 실패했습니다");
     await assertNoError(supabase.from("teams").delete().in("id", targetIds), "팀 삭제에 실패했습니다");
 
     await assertNoError(
