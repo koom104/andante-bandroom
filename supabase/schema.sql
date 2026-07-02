@@ -73,15 +73,6 @@ create table if not exists public.bookings (
   )
 );
 
-create table if not exists public.news_items (
-  id uuid primary key default gen_random_uuid(),
-  title text not null,
-  body text not null,
-  tag text not null default '공지',
-  created_by uuid references public.profiles(id),
-  created_at timestamptz not null default now()
-);
-
 create table if not exists public.audit_logs (
   id uuid primary key default gen_random_uuid(),
   actor_id uuid references public.profiles(id),
@@ -505,7 +496,6 @@ alter table public.teams enable row level security;
 alter table public.team_members enable row level security;
 alter table public.member_schedules enable row level security;
 alter table public.bookings enable row level security;
-alter table public.news_items enable row level security;
 alter table public.audit_logs enable row level security;
 
 drop policy if exists "profiles_select" on public.profiles;
@@ -603,21 +593,6 @@ to authenticated
 using (public.is_admin(auth.uid()))
 with check (public.is_admin(auth.uid()));
 
-drop policy if exists "news_select" on public.news_items;
-create policy "news_select"
-on public.news_items
-for select
-to authenticated
-using (public.is_approved(auth.uid()));
-
-drop policy if exists "news_admin_manage" on public.news_items;
-create policy "news_admin_manage"
-on public.news_items
-for all
-to authenticated
-using (public.is_admin(auth.uid()))
-with check (public.is_admin(auth.uid()));
-
 drop policy if exists "audit_select_admin" on public.audit_logs;
 create policy "audit_select_admin"
 on public.audit_logs
@@ -636,18 +611,6 @@ grant execute on function public.create_team(text, text, uuid, jsonb) to authent
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date) to authenticated;
 grant execute on function public.create_bookings(uuid, text, date, text, jsonb) to authenticated;
 grant execute on function public.cancel_booking(uuid, text) to authenticated;
-
-insert into public.news_items (title, body, tag)
-select '금요일까지 축제 셋리스트 제출', '팀장은 최종 곡명, 러닝타임, 필요한 장비를 함께 등록해 주세요.', '공지'
-where not exists (select 1 from public.news_items);
-
-insert into public.news_items (title, body, tag)
-select '드럼 페달 교체 완료', '새 페달은 A룸에 보관됩니다. 합주 후 장력은 기본값으로 돌려주세요.', '장비'
-where not exists (select 1 from public.news_items where title = '드럼 페달 교체 완료');
-
-insert into public.news_items (title, body, tag)
-select '신입부원 잼데이', '토요일 15시에 자유 합주가 열립니다. 예약 없는 팀도 참관 가능합니다.', '행사'
-where not exists (select 1 from public.news_items where title = '신입부원 잼데이');
 
 insert into public.profiles (
   id,

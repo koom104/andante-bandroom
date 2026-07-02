@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { supabase } from "./supabase";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
-type Tab = "booking" | "suggestions" | "my" | "team" | "news" | "admin";
+type Tab = "booking" | "suggestions" | "my" | "team" | "admin";
 type Role = "member" | "admin";
 type ProfileStatus = "pending" | "approved" | "rejected" | "suspended";
 type SessionRole = "보컬" | "리드기타" | "세컨기타" | "어쿠스틱" | "드럼" | "피아노" | "신디";
@@ -72,14 +72,6 @@ type BookingGroup = {
   times: string[];
 };
 
-type NewsItem = {
-  id: string;
-  title: string;
-  body: string;
-  tag: string;
-  created_at?: string;
-};
-
 type TeamMemberDraft = {
   userId: string;
   name: string;
@@ -126,7 +118,6 @@ const baseTabs: Array<{ id: Tab; label: string; short: string }> = [
   { id: "suggestions", label: "예약", short: "R" },
   { id: "my", label: "마이", short: "M" },
   { id: "team", label: "팀", short: "+" },
-  { id: "news", label: "소식", short: "N" },
 ];
 
 const adminTab = { id: "admin" as const, label: "관리", short: "!" };
@@ -173,21 +164,27 @@ function dateToDay(date: string): Day {
   return dateDayNames[parseISODate(date).getDay()];
 }
 
-function startOfWeek(date: string) {
-  const current = parseISODate(date);
-  const dayIndex = current.getDay();
-  const mondayOffset = dayIndex === 0 ? -6 : 1 - dayIndex;
-  current.setDate(current.getDate() + mondayOffset);
-  return toISODate(current);
-}
-
-function weekDates(anchorDate = todayISO()) {
-  const start = startOfWeek(anchorDate);
-  return Array.from({ length: 7 }, (_, index) => addDays(start, index));
-}
-
 function nextDates(amount: number, anchorDate = todayISO()) {
   return Array.from({ length: amount }, (_, index) => addDays(anchorDate, index));
+}
+
+function nextDateForDay(day: Day, anchorDate = todayISO()) {
+  for (let index = 0; index < 7; index += 1) {
+    const date = addDays(anchorDate, index);
+    if (dateToDay(date) === day) {
+      return date;
+    }
+  }
+
+  return anchorDate;
+}
+
+function reservationDisplayDate(reservation: Reservation, anchorDate = todayISO()) {
+  return reservation.bookingDate ?? nextDateForDay(reservation.day, anchorDate);
+}
+
+function isFutureReservation(reservation: Reservation, anchorDate = todayISO()) {
+  return reservation.status === "confirmed" && reservationDisplayDate(reservation, anchorDate) >= anchorDate;
 }
 
 function formatDateShort(date: string) {
@@ -370,7 +367,6 @@ export default function Home() {
   const [busyByUser, setBusyByUser] = useState<Record<string, string[]>>({});
   const [rehearsalByUser, setRehearsalByUser] = useState<Record<string, string[]>>({});
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedBookingDate, setSelectedBookingDate] = useState(todayISO);
   const [bookingSelection, setBookingSelection] = useState<{ teamId: string; date: string; times: string[] }>({
@@ -446,16 +442,15 @@ export default function Home() {
     setIsLoadingData(true);
     setDbError(null);
 
-    const [profileResult, teamResult, memberResult, scheduleResult, bookingResult, newsResult] = await Promise.all([
+    const [profileResult, teamResult, memberResult, scheduleResult, bookingResult] = await Promise.all([
       supabase.from("profiles").select("*").order("created_at", { ascending: true }),
       supabase.from("teams").select("*").order("created_at", { ascending: true }),
       supabase.from("team_members").select("*").order("created_at", { ascending: true }),
       supabase.from("member_schedules").select("*"),
       supabase.from("bookings").select("*").order("created_at", { ascending: false }),
-      supabase.from("news_items").select("*").order("created_at", { ascending: false }),
     ]);
 
-    const firstError = [profileResult, teamResult, memberResult, scheduleResult, bookingResult, newsResult].find((result) => result.error)?.error;
+    const firstError = [profileResult, teamResult, memberResult, scheduleResult, bookingResult].find((result) => result.error)?.error;
     if (firstError) {
       setDbError(getErrorMessage(firstError));
       setIsLoadingData(false);
@@ -577,7 +572,6 @@ export default function Home() {
     setRehearsalByUser(rehearsalMap);
     setTeams(nextTeams);
     setReservations(nextReservations);
-    setNewsItems((newsResult.data ?? []) as NewsItem[]);
     setIsLoadingData(false);
   }, [profile]);
 
@@ -604,7 +598,6 @@ export default function Home() {
         setBusyByUser({});
         setRehearsalByUser({});
         setReservations([]);
-        setNewsItems([]);
         setIsBooting(false);
       }
     });
@@ -639,7 +632,6 @@ export default function Home() {
   const visibleTabs = profile?.role === "admin" ? [...baseTabs, adminTab] : baseTabs;
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
-  const currentWeekDates = useMemo(() => weekDates(todayISO()), []);
   const reservationDates = useMemo(() => nextDates(21), []);
   const leaderTeams = useMemo(() => teams.filter((team) => team.leaderId === profile?.id), [teams, profile?.id]);
   const selectedBookingTeam = leaderTeams.find((team) => team.id === selectedTeamId) ?? leaderTeams[0] ?? null;
@@ -663,11 +655,11 @@ export default function Home() {
     return rawSelectedBookingTimes.filter((time) => selectableTimes.has(time));
   }, [bookingSelection, selectedBookingTeam?.id, selectedBookingDate, selectableBookingTimes]);
   const upcomingReservations = reservations
-    .filter((reservation) => reservation.status === "confirmed")
+    .filter((reservation) => isFutureReservation(reservation))
     .slice()
     .sort((a, b) => {
-      const dateCompare = (a.bookingDate ?? "").localeCompare(b.bookingDate ?? "");
-      return dateCompare || days.indexOf(a.day) - days.indexOf(b.day) || timeToMinutes(a.start) - timeToMinutes(b.start);
+      const dateCompare = reservationDisplayDate(a).localeCompare(reservationDisplayDate(b));
+      return dateCompare || timeToMinutes(a.start) - timeToMinutes(b.start);
     });
 
   async function signIn(email: string, password: string) {
@@ -914,39 +906,6 @@ export default function Home() {
     await refreshData();
   }
 
-  async function addNews(payload: { title: string; body: string; tag: string }) {
-    if (!profile) {
-      return;
-    }
-
-    const { error } = await supabase.from("news_items").insert({
-      title: payload.title,
-      body: payload.body,
-      tag: payload.tag,
-      created_by: profile.id,
-    });
-
-    if (error) {
-      setStatus(getErrorMessage(error));
-      return;
-    }
-
-    setStatus("새 소식을 올렸어요.");
-    await refreshData();
-  }
-
-  async function deleteNews(newsId: string) {
-    const { error } = await supabase.from("news_items").delete().eq("id", newsId);
-
-    if (error) {
-      setStatus(getErrorMessage(error));
-      return;
-    }
-
-    setStatus("소식을 삭제했어요.");
-    await refreshData();
-  }
-
   async function cancelBooking(bookingId: string, reason: string) {
     if (!profile) {
       return;
@@ -1041,7 +1000,6 @@ export default function Home() {
                   <BookingTab
                     selectedTeam={selectedTeam}
                     reservations={upcomingReservations}
-                    weekDates={currentWeekDates}
                     reservationDates={reservationDates}
                     openTeamTab={() => setActiveTab("team")}
                     currentUserId={profile.id}
@@ -1077,19 +1035,14 @@ export default function Home() {
                   <TeamTab teams={teams} approvedProfiles={approvedProfiles} onAddTeam={addTeam} currentUserId={profile.id} />
                 )}
 
-                {activeTab === "news" && <NewsTab newsItems={newsItems} reservations={upcomingReservations} />}
-
                 {activeTab === "admin" && profile.role === "admin" && (
                   <AdminTab
                     pendingProfiles={pendingProfiles}
                     approvedProfiles={approvedProfiles}
                     reservations={upcomingReservations}
-                    newsItems={newsItems}
                     busyByUser={busyByUser}
                     rehearsalByUser={rehearsalByUser}
                     approveProfile={approveProfile}
-                    addNews={addNews}
-                    deleteNews={deleteNews}
                     cancelBooking={cancelBooking}
                     toggleSchedule={toggleSchedule}
                   />
@@ -1339,7 +1292,6 @@ function AppHeader({
 function BookingTab({
   selectedTeam,
   reservations,
-  weekDates,
   reservationDates,
   openTeamTab,
   currentUserId,
@@ -1347,7 +1299,6 @@ function BookingTab({
 }: {
   selectedTeam: Team | null;
   reservations: Reservation[];
-  weekDates: string[];
   reservationDates: string[];
   openTeamTab: () => void;
   currentUserId: string;
@@ -1374,13 +1325,6 @@ function BookingTab({
 
   const isLeader = selectedTeam.leaderId === currentUserId;
   const teamReservations = reservations.filter((reservation) => reservation.teamId === selectedTeam.id);
-  const weekReservations = reservations
-    .filter((reservation) => weekDates.some((date) => reservationMatchesDate(reservation, date)))
-    .sort((a, b) => {
-      const aDate = a.bookingDate ?? weekDates.find((date) => reservationMatchesDate(a, date)) ?? "";
-      const bDate = b.bookingDate ?? weekDates.find((date) => reservationMatchesDate(b, date)) ?? "";
-      return aDate.localeCompare(bDate) || timeToMinutes(a.start) - timeToMinutes(b.start);
-    });
   const detailDate =
     selectedReservationDay && reservationDates.includes(selectedReservationDay)
       ? selectedReservationDay
@@ -1389,16 +1333,16 @@ function BookingTab({
 
   return (
     <div className="space-y-3">
-      <MobilePanel title="이번 주 합주 일정">
+      <MobilePanel title="합주 일정">
         <div className="space-y-2">
-          {weekReservations.slice(0, 5).map((reservation) => {
-            const date = reservation.bookingDate ?? weekDates.find((item) => reservationMatchesDate(reservation, item));
+          {reservations.map((reservation) => {
+            const date = reservationDisplayDate(reservation);
 
             return (
               <div key={reservation.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-sm font-semibold">{date ? formatDateLabel(date) : `${reservation.day}요일`}</p>
+                    <p className="text-sm font-semibold">{formatDateLabel(date)}</p>
                     <p className="mt-1 text-xs text-slate-500">
                       {reservation.teamName} - {reservation.purpose || reservation.teamSong || "합주"}
                     </p>
@@ -1412,7 +1356,7 @@ function BookingTab({
               </div>
             );
           })}
-          {weekReservations.length === 0 && <EmptyText text="이번 주에 잡힌 합주가 없습니다." />}
+          {reservations.length === 0 && <EmptyText text="앞으로 잡힌 합주가 없습니다." />}
         </div>
       </MobilePanel>
 
@@ -1952,45 +1896,25 @@ function AdminTab({
   pendingProfiles,
   approvedProfiles,
   reservations,
-  newsItems,
   busyByUser,
   rehearsalByUser,
   approveProfile,
-  addNews,
-  deleteNews,
   cancelBooking,
   toggleSchedule,
 }: {
   pendingProfiles: Profile[];
   approvedProfiles: Profile[];
   reservations: Reservation[];
-  newsItems: NewsItem[];
   busyByUser: Record<string, string[]>;
   rehearsalByUser: Record<string, string[]>;
   approveProfile: (profileId: string, nextStatus: "approved" | "rejected") => Promise<void>;
-  addNews: (payload: { title: string; body: string; tag: string }) => Promise<void>;
-  deleteNews: (newsId: string) => Promise<void>;
   cancelBooking: (bookingId: string, reason: string) => Promise<void>;
   toggleSchedule: (userId: string, day: Day, time: string) => Promise<void>;
 }) {
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [tag, setTag] = useState("공지");
   const [selectedUserId, setSelectedUserId] = useState("");
 
   const effectiveSelectedUserId = approvedProfiles.some((item) => item.id === selectedUserId) ? selectedUserId : approvedProfiles[0]?.id ?? "";
   const selectedProfile = approvedProfiles.find((item) => item.id === effectiveSelectedUserId);
-
-  async function submitNews() {
-    if (!title.trim() || !body.trim()) {
-      return;
-    }
-
-    await addNews({ title: title.trim(), body: body.trim(), tag: tag.trim() || "공지" });
-    setTitle("");
-    setBody("");
-    setTag("공지");
-  }
 
   return (
     <div className="space-y-3">
@@ -1998,7 +1922,7 @@ function AdminTab({
         <p className="text-xs font-semibold text-[#ef6351]">관리자</p>
         <h3 className="mt-1 text-xl font-semibold">승인과 운영 관리</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          가입 승인, 소식 작성, 예약 취소, 부원 시간표 수정을 처리합니다.
+          가입 승인, 예약 취소, 부원 시간표 수정을 처리합니다.
         </p>
       </MobilePanel>
 
@@ -2026,34 +1950,6 @@ function AdminTab({
             </div>
           ))}
           {pendingProfiles.length === 0 && <EmptyText text="승인 대기 중인 부원이 없습니다." />}
-        </div>
-      </MobilePanel>
-
-      <MobilePanel title="소식 작성">
-        <div className="space-y-3">
-          <LabeledInput label="태그" value={tag} onChange={setTag} placeholder="공지" />
-          <LabeledInput label="제목" value={title} onChange={setTitle} placeholder="소식 제목" />
-          <LabeledTextarea label="내용" value={body} onChange={setBody} placeholder="소식 내용을 입력하세요." />
-          <button type="button" onClick={submitNews} className="h-10 w-full rounded-lg bg-slate-950 text-sm font-semibold text-white">
-            소식 올리기
-          </button>
-        </div>
-      </MobilePanel>
-
-      <MobilePanel title="소식 관리">
-        <div className="space-y-2">
-          {newsItems.map((item) => (
-            <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0ded7] bg-white p-3">
-              <div>
-                <p className="text-sm font-semibold">{item.title}</p>
-                <p className="mt-1 text-xs text-slate-500">{item.tag}</p>
-              </div>
-              <button type="button" onClick={() => deleteNews(item.id)} className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
-                삭제
-              </button>
-            </div>
-          ))}
-          {newsItems.length === 0 && <EmptyText text="등록된 소식이 없습니다." />}
         </div>
       </MobilePanel>
 
@@ -2131,30 +2027,6 @@ function LabeledInput({
   );
 }
 
-function LabeledTextarea({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-}) {
-  return (
-    <label className="block">
-      <span className="text-xs font-semibold text-slate-500">{label}</span>
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="mt-2 min-h-24 w-full resize-none rounded-lg border border-[#f0ded7] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#ff665a]"
-      />
-    </label>
-  );
-}
-
 function SessionSelect({
   label,
   value,
@@ -2208,52 +2080,6 @@ function ProfileSelect({
         ))}
       </select>
     </label>
-  );
-}
-
-function NewsTab({
-  newsItems,
-  reservations,
-}: {
-  newsItems: NewsItem[];
-  reservations: Reservation[];
-}) {
-  return (
-    <div className="space-y-3">
-      <MobilePanel title="동아리 소식">
-        <div className="space-y-2">
-          {newsItems.map((item) => (
-            <article key={item.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
-              <div className="flex items-center gap-2">
-                <span className="rounded-md bg-slate-950 px-2 py-1 text-[11px] font-semibold text-white">{item.tag}</span>
-                <h3 className="text-sm font-semibold">{item.title}</h3>
-              </div>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{item.body}</p>
-            </article>
-          ))}
-          {newsItems.length === 0 && <EmptyText text="아직 올라온 소식이 없습니다." />}
-        </div>
-      </MobilePanel>
-
-      <MobilePanel title="다가오는 예약">
-        <div className="space-y-2">
-          {reservations.slice(0, 6).map((reservation) => (
-            <div key={reservation.id} className="flex items-center justify-between rounded-lg border border-[#f0ded7] bg-white p-3">
-              <div>
-                <p className="text-sm font-semibold">{reservation.teamName}</p>
-                <p className="mt-1 text-xs text-slate-500">{reservation.purpose}</p>
-              </div>
-              <p className="text-right text-sm font-semibold">
-                {reservation.bookingDate ? formatDateShort(reservation.bookingDate) : reservation.day}
-                <br />
-                {reservation.start}
-              </p>
-            </div>
-          ))}
-          {reservations.length === 0 && <EmptyText text="다가오는 예약이 없습니다." />}
-        </div>
-      </MobilePanel>
-    </div>
   );
 }
 
