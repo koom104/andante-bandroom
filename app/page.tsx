@@ -392,6 +392,7 @@ function isMissingSchemaError(message: string) {
 
 export default function Home() {
   const [session, setSession] = useState<SupabaseSession | null>(null);
+  const [authAccessToken, setAuthAccessToken] = useState("");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -615,6 +616,7 @@ export default function Home() {
       }
 
       setSession(data.session);
+      setAuthAccessToken(data.session?.access_token ?? "");
       if (!data.session) {
         setIsBooting(false);
       }
@@ -622,6 +624,7 @@ export default function Home() {
 
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+      setAuthAccessToken(nextSession?.access_token ?? "");
       if (event === "SIGNED_IN") {
         setActiveTab("booking");
       }
@@ -700,13 +703,14 @@ export default function Home() {
 
   async function signIn(email: string, password: string) {
     setAuthNotice("");
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       setAuthNotice(getErrorMessage(error));
       return;
     }
 
+    setAuthAccessToken(data.session?.access_token ?? "");
     setAuthNotice("로그인했습니다.");
     setActiveTab("booking");
   }
@@ -741,6 +745,7 @@ export default function Home() {
 
   async function signOut() {
     await supabase.auth.signOut();
+    setAuthAccessToken("");
     setStatus("로그인 후 팀 예약을 시작할 수 있어요.");
   }
 
@@ -945,7 +950,34 @@ export default function Home() {
 
   async function getCurrentAccessToken() {
     const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? session?.access_token ?? readStoredAccessToken();
+    if (data.session?.access_token) {
+      setAuthAccessToken(data.session.access_token);
+      return data.session.access_token;
+    }
+
+    if (session?.access_token) {
+      setAuthAccessToken(session.access_token);
+      return session.access_token;
+    }
+
+    if (authAccessToken) {
+      return authAccessToken;
+    }
+
+    const storedAccessToken = readStoredAccessToken();
+    if (storedAccessToken) {
+      setAuthAccessToken(storedAccessToken);
+      return storedAccessToken;
+    }
+
+    const refreshed = await supabase.auth.refreshSession();
+    const refreshedAccessToken = refreshed.data.session?.access_token ?? "";
+    if (refreshedAccessToken) {
+      setSession(refreshed.data.session);
+      setAuthAccessToken(refreshedAccessToken);
+    }
+
+    return refreshedAccessToken;
   }
 
   async function deleteMemberAccount(profileId: string) {
