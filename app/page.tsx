@@ -186,6 +186,10 @@ function weekDates(anchorDate = todayISO()) {
   return Array.from({ length: 7 }, (_, index) => addDays(start, index));
 }
 
+function nextDates(amount: number, anchorDate = todayISO()) {
+  return Array.from({ length: amount }, (_, index) => addDays(anchorDate, index));
+}
+
 function formatDateShort(date: string) {
   const parsed = parseISODate(date);
   return `${parsed.getMonth() + 1}.${parsed.getDate()}`;
@@ -230,11 +234,6 @@ function isReserved(reservation: Reservation, date: string, time: string) {
 
 function findReservation(reservations: Reservation[], date: string, time: string) {
   return reservations.find((reservation) => isReserved(reservation, date, time));
-}
-
-function formatSlotHours(slotCount: number) {
-  const hours = (slotCount * slotMinutes) / 60;
-  return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
 }
 
 function formatDuration(duration: number) {
@@ -641,6 +640,7 @@ export default function Home() {
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
   const currentWeekDates = useMemo(() => weekDates(todayISO()), []);
+  const reservationDates = useMemo(() => nextDates(21), []);
   const leaderTeams = useMemo(() => teams.filter((team) => team.leaderId === profile?.id), [teams, profile?.id]);
   const selectedBookingTeam = leaderTeams.find((team) => team.id === selectedTeamId) ?? leaderTeams[0] ?? null;
   const bookingBusy = useMemo(() => selectedBookingTeam?.busy ?? emptyBusy, [selectedBookingTeam]);
@@ -1042,6 +1042,7 @@ export default function Home() {
                     selectedTeam={selectedTeam}
                     reservations={upcomingReservations}
                     weekDates={currentWeekDates}
+                    reservationDates={reservationDates}
                     openTeamTab={() => setActiveTab("team")}
                     currentUserId={profile.id}
                     onCancelBooking={cancelBooking}
@@ -1339,6 +1340,7 @@ function BookingTab({
   selectedTeam,
   reservations,
   weekDates,
+  reservationDates,
   openTeamTab,
   currentUserId,
   onCancelBooking,
@@ -1346,11 +1348,12 @@ function BookingTab({
   selectedTeam: Team | null;
   reservations: Reservation[];
   weekDates: string[];
+  reservationDates: string[];
   openTeamTab: () => void;
   currentUserId: string;
   onCancelBooking: (bookingId: string, reason: string) => Promise<void>;
 }) {
-  const [selectedReservationDay, setSelectedReservationDay] = useState<string | null>(null);
+  const [selectedReservationDay, setSelectedReservationDay] = useState(todayISO);
 
   if (!selectedTeam) {
     return (
@@ -1379,9 +1382,10 @@ function BookingTab({
       return aDate.localeCompare(bDate) || timeToMinutes(a.start) - timeToMinutes(b.start);
     });
   const detailDate =
-    selectedReservationDay && weekDates.includes(selectedReservationDay)
+    selectedReservationDay && reservationDates.includes(selectedReservationDay)
       ? selectedReservationDay
-      : weekDates.find((date) => reservations.some((reservation) => reservationMatchesDate(reservation, date))) ?? weekDates[0];
+      : reservationDates.find((date) => reservations.some((reservation) => reservationMatchesDate(reservation, date))) ?? reservationDates[0];
+  const detailReservations = reservations.filter((reservation) => reservation.status === "confirmed" && reservationMatchesDate(reservation, detailDate));
 
   return (
     <div className="space-y-3">
@@ -1412,18 +1416,36 @@ function BookingTab({
         </div>
       </MobilePanel>
 
-      <MobilePanel title="이번 주 예약 현황">
-        <div className="space-y-2">
-          {weekDates.map((date) => (
-            <CompactDayRow
-              key={date}
-              date={date}
-              reservations={reservations}
-              selectedTeamId={selectedTeam.id}
-              isSelected={detailDate === date}
-              onSelect={() => setSelectedReservationDay(date)}
-            />
-          ))}
+      <MobilePanel title="예약 현황">
+        <p className="text-xs font-semibold text-slate-500">오늘부터 3주</p>
+        <div className="mt-3 grid grid-cols-7 gap-1.5">
+          {reservationDates.map((date) => {
+            const isSelected = detailDate === date;
+            const dayReservations = reservations.filter(
+              (reservation) => reservation.status === "confirmed" && reservationMatchesDate(reservation, date),
+            );
+
+            return (
+              <button
+                key={date}
+                type="button"
+                onClick={() => setSelectedReservationDay(date)}
+                className={`min-h-14 rounded-lg border px-1 py-2 text-center transition ${
+                  isSelected ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white text-slate-700"
+                }`}
+                aria-pressed={isSelected}
+              >
+                <span className="block text-xs font-semibold">{dateToDay(date)}</span>
+                <span className="mt-1 block text-xs font-semibold">{formatDateShort(date)}</span>
+                {dayReservations.length > 0 && (
+                  <span className={`mx-auto mt-1 block h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-[#ff665a]"}`} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          {formatDateLabel(detailDate)} · {detailReservations.length > 0 ? `${detailReservations.length}건 예약` : "예약 없음"}
         </div>
       </MobilePanel>
 
@@ -2250,91 +2272,6 @@ function ProfileStat({ label, value }: { label: string; value: string }) {
       <p className="text-[11px] font-semibold text-slate-500">{label}</p>
       <p className="mt-1 break-words text-sm font-semibold leading-5 text-slate-950">{value}</p>
     </div>
-  );
-}
-
-function CompactDayRow({
-  date,
-  reservations,
-  selectedTeamId,
-  isSelected,
-  onSelect,
-}: {
-  date: string;
-  reservations: Reservation[];
-  selectedTeamId: string;
-  isSelected: boolean;
-  onSelect: () => void;
-}) {
-  const day = dateToDay(date);
-  const dayReservations = reservations
-    .filter((reservation) => reservation.status === "confirmed" && reservationMatchesDate(reservation, date))
-    .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
-  const reservedSlotCount = new Set(dayReservations.flatMap((reservation) => reservationSlots(reservation.start, reservation.duration))).size;
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`w-full rounded-lg border p-3 text-left transition ${
-        isSelected ? "border-[#ff665a] bg-[#fff0eb]" : "border-[#f0ded7] bg-white"
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">
-          {day}요일 <span className="text-xs text-slate-500">{formatDateShort(date)}</span>
-        </span>
-        <span className={`text-xs ${isSelected ? "font-semibold text-[#be3d33]" : "text-slate-500"}`}>
-          {isSelected ? "상세 보기" : "10:00-24:00"}
-        </span>
-      </div>
-      <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-        <span>{dayReservations.length > 0 ? `${dayReservations.length}건 예약` : "예약 없음"}</span>
-        <span>{reservedSlotCount > 0 ? `${formatSlotHours(reservedSlotCount)} 사용` : "전체 비어 있음"}</span>
-      </div>
-      <div className="mt-3 grid gap-0.5" style={{ gridTemplateColumns: `repeat(${timeSlots.length}, minmax(0, 1fr))` }}>
-        {timeSlots.map((time) => {
-          const reservation = findReservation(reservations, date, time);
-          const isMine = reservation?.teamId === selectedTeamId;
-
-          return (
-            <div
-              key={`${day}-${time}`}
-              title={`${formatDateLabel(date)} ${time} ${reservation ? reservation.teamName : "빈 시간"}`}
-              className={`h-5 rounded-sm ${
-                reservation
-                  ? isMine
-                    ? "bg-[#ff665a]"
-                    : "bg-slate-300"
-                  : "bg-emerald-100"
-              }`}
-            >
-              <span className="sr-only">{reservation ? reservation.teamName : "빈 시간"}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-3 space-y-1.5">
-        {dayReservations.slice(0, 4).map((reservation) => {
-          const isMine = reservation.teamId === selectedTeamId;
-
-          return (
-            <div
-              key={reservation.id}
-              className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs ${
-                isMine ? "bg-[#fff0eb] text-[#be3d33]" : "bg-slate-100 text-slate-600"
-              }`}
-            >
-              <span className="font-semibold">
-                {reservation.start}-{addHours(reservation.start, reservation.duration)}
-              </span>
-              <span className="truncate">{reservation.teamName}</span>
-            </div>
-          );
-        })}
-        {dayReservations.length > 4 && <p className="text-xs text-slate-500">외 {dayReservations.length - 4}건 더 있음</p>}
-      </div>
-    </button>
   );
 }
 
