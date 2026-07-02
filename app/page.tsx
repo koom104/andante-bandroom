@@ -65,6 +65,13 @@ type BookingSlot = {
   status: "reserved" | "available" | "limited" | "unavailable";
 };
 
+type BookingGroup = {
+  start: string;
+  end: string;
+  duration: number;
+  times: string[];
+};
+
 type NewsItem = {
   id: string;
   title: string;
@@ -231,11 +238,48 @@ function formatSlotHours(slotCount: number) {
 }
 
 function formatDuration(duration: number) {
-  if (duration === 0.5) {
-    return "30분";
+  const totalMinutes = Math.round(duration * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0 && minutes > 0) {
+    return `${hours}시간 ${minutes}분`;
   }
 
-  return Number.isInteger(duration) ? `${duration}시간` : `${duration}시간`;
+  if (hours > 0) {
+    return `${hours}시간`;
+  }
+
+  return `${minutes}분`;
+}
+
+function groupBookingTimes(times: string[]): BookingGroup[] {
+  const sortedTimes = [...new Set(times)].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+  const groups: string[][] = [];
+
+  for (const time of sortedTimes) {
+    const currentGroup = groups[groups.length - 1];
+    const previousTime = currentGroup?.[currentGroup.length - 1];
+
+    if (!currentGroup || !previousTime || timeToMinutes(time) !== timeToMinutes(previousTime) + slotMinutes) {
+      groups.push([time]);
+      continue;
+    }
+
+    currentGroup.push(time);
+  }
+
+  return groups.map((group) => {
+    const start = group[0];
+    const duration = (group.length * slotMinutes) / 60;
+
+    return {
+      start,
+      end: addHours(start, duration),
+      duration,
+      times: group,
+    };
+  });
 }
 
 function buildBookingSlots(
@@ -330,6 +374,11 @@ export default function Home() {
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedBookingDate, setSelectedBookingDate] = useState(todayISO);
+  const [bookingSelection, setBookingSelection] = useState<{ teamId: string; date: string; times: string[] }>({
+    teamId: "",
+    date: todayISO(),
+    times: [],
+  });
   const [activeTab, setActiveTab] = useState<Tab>("booking");
   const [status, setStatus] = useState("로그인 후 팀 예약을 시작할 수 있어요.");
   const [authNotice, setAuthNotice] = useState("");
@@ -601,6 +650,16 @@ export default function Home() {
     () => (selectedTeam ? buildBookingSlots(selectedTeam, busy, selectedTeamRehearsals, reservations, selectedBookingDate) : []),
     [selectedTeam, busy, selectedTeamRehearsals, reservations, selectedBookingDate],
   );
+  const selectableBookingTimes = useMemo(
+    () => bookingSlots.filter((slot) => slot.status === "available" || slot.status === "limited").map((slot) => slot.time),
+    [bookingSlots],
+  );
+  const selectedBookingTimes = useMemo(() => {
+    const rawSelectedBookingTimes =
+      bookingSelection.teamId === (selectedTeam?.id ?? "") && bookingSelection.date === selectedBookingDate ? bookingSelection.times : [];
+    const selectableTimes = new Set(selectableBookingTimes);
+    return rawSelectedBookingTimes.filter((time) => selectableTimes.has(time));
+  }, [bookingSelection, selectedTeam?.id, selectedBookingDate, selectableBookingTimes]);
   const upcomingReservations = reservations
     .filter((reservation) => reservation.status === "confirmed")
     .slice()
@@ -743,41 +802,78 @@ export default function Home() {
 
     if (
       message.includes("create_booking") ||
+      message.includes("create_bookings") ||
       message.includes("booking_date") ||
       message.includes("duration") ||
-      message.includes("day_of_week")
+      message.includes("day_of_week") ||
+      message.includes("bookings_duration_check") ||
+      message.includes("예약 길이는")
     ) {
-      return "DB 예약 구조가 아직 예전 설정입니다. Supabase SQL Editor에서 patch-004-date-bookings.sql을 한 번 실행해 주세요.";
+      return "DB 예약 구조가 아직 예전 설정입니다. Supabase SQL Editor에서 patch-005-multi-slot-bookings.sql을 한 번 실행해 주세요.";
     }
 
     return message;
   }
 
-  async function reserveSlot(slot: BookingSlot) {
+  function toggleBookingTime(time: string) {
+    const teamId = selectedTeam?.id ?? "";
+
+    setBookingSelection((currentSelection) => {
+      const currentTimes =
+        currentSelection.teamId === teamId && currentSelection.date === selectedBookingDate ? currentSelection.times : [];
+      const nextTimes = currentTimes.includes(time)
+        ? currentTimes.filter((item) => item !== time)
+        : [...currentTimes, time].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+
+      return {
+        teamId,
+        date: selectedBookingDate,
+        times: nextTimes,
+      };
+    });
+  }
+
+  function clearBookingSelection() {
+    setBookingSelection({
+      teamId: selectedTeam?.id ?? "",
+      date: selectedBookingDate,
+      times: [],
+    });
+  }
+
+  async function reserveSelectedBookingTimes() {
     if (!selectedTeam) {
       setActiveTab("team");
       setStatus("먼저 팀을 만들어 주세요.");
       return;
     }
 
-    if (slot.status === "reserved") {
-      setStatus("이미 예약된 시간입니다.");
+    if (selectedBookingTimes.length === 0) {
+      setStatus("예약할 시간대를 먼저 선택해 주세요.");
       return;
     }
 
-    if (slot.status === "unavailable") {
-      setStatus("참여 가능한 팀원이 없는 시간입니다.");
+    const selectableTimes = new Set(selectableBookingTimes);
+    const validTimes = selectedBookingTimes.filter((time) => selectableTimes.has(time));
+
+    if (validTimes.length === 0) {
+      clearBookingSelection();
+      setStatus("선택한 시간대가 이미 예약됐거나 예약할 수 없는 상태입니다.");
       return;
     }
 
     const bookingDay = dateToDay(selectedBookingDate);
-    const { error } = await supabase.rpc("create_booking", {
+    const bookingGroups = groupBookingTimes(validTimes);
+
+    const { error } = await supabase.rpc("create_bookings", {
       p_team_id: selectedTeam.id,
       p_day: bookingDay,
-      p_start_time: slot.time,
-      p_duration: 0.5,
-      p_purpose: selectedTeam.song,
       p_booking_date: selectedBookingDate,
+      p_purpose: selectedTeam.song,
+      p_groups: bookingGroups.map((group) => ({
+        start_time: group.start,
+        duration: group.duration,
+      })),
     });
 
     if (error) {
@@ -786,7 +882,9 @@ export default function Home() {
       return;
     }
 
-    setStatus(`${formatDateLabel(selectedBookingDate)} ${slot.time} 예약이 확정됐어요.`);
+    const groupText = bookingGroups.map((group) => `${group.start}-${group.end}`).join(", ");
+    clearBookingSelection();
+    setStatus(`${formatDateLabel(selectedBookingDate)} ${groupText} 예약이 확정됐어요.`);
     setActiveTab("booking");
     await refreshData();
   }
@@ -956,7 +1054,9 @@ export default function Home() {
                     selectedDate={selectedBookingDate}
                     setSelectedDate={setSelectedBookingDate}
                     slots={bookingSlots}
-                    onReserve={reserveSlot}
+                    selectedTimes={selectedBookingTimes}
+                    onToggleSlot={toggleBookingTime}
+                    onReserveSelected={reserveSelectedBookingTimes}
                   />
                 )}
 
@@ -1400,22 +1500,28 @@ function SuggestionsTab({
   selectedDate,
   setSelectedDate,
   slots,
-  onReserve,
+  selectedTimes,
+  onToggleSlot,
+  onReserveSelected,
 }: {
   selectedTeam: Team | null;
   selectedDate: string;
   setSelectedDate: (date: string) => void;
   slots: BookingSlot[];
-  onReserve: (slot: BookingSlot) => Promise<void>;
+  selectedTimes: string[];
+  onToggleSlot: (time: string) => void;
+  onReserveSelected: () => Promise<void>;
 }) {
   if (!selectedTeam) {
     return <EmptyState title="예약할 팀이 없습니다" body="팀 탭에서 먼저 팀을 만들어 주세요." />;
   }
 
-  const quickDates = Array.from({ length: 14 }, (_, index) => addDays(todayISO(), index));
+  const quickDates = Array.from({ length: 21 }, (_, index) => addDays(todayISO(), index));
   const availableCount = slots.filter((slot) => slot.status === "available").length;
   const limitedCount = slots.filter((slot) => slot.status === "limited").length;
   const reservedCount = slots.filter((slot) => slot.status === "reserved").length;
+  const selectedGroups = groupBookingTimes(selectedTimes);
+  const selectedDuration = selectedTimes.length * 0.5;
 
   return (
     <div className="space-y-3">
@@ -1437,7 +1543,8 @@ function SuggestionsTab({
             className="mt-2 h-11 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm font-semibold outline-none transition focus:border-[#ff665a]"
           />
         </label>
-        <div className="mt-3 grid grid-cols-7 gap-1">
+        <p className="mt-3 text-xs font-semibold text-slate-500">오늘부터 3주</p>
+        <div className="mt-2 grid grid-cols-7 gap-1">
           {quickDates.map((date) => (
             <button
               key={date}
@@ -1467,6 +1574,36 @@ function SuggestionsTab({
         </div>
       </MobilePanel>
 
+      <MobilePanel title="선택한 시간">
+        {selectedGroups.length > 0 ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <ProfileStat label="선택 길이" value={formatDuration(selectedDuration)} />
+              <ProfileStat label="예약 건수" value={`${selectedGroups.length}건`} />
+            </div>
+            <div className="space-y-2">
+              {selectedGroups.map((group) => (
+                <div key={`${group.start}-${group.end}`} className="flex items-center justify-between rounded-lg bg-[#fff0eb] px-3 py-2">
+                  <span className="text-sm font-semibold">
+                    {group.start}-{group.end}
+                  </span>
+                  <span className="text-xs font-semibold text-[#be3d33]">{formatDuration(group.duration)}</span>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => void onReserveSelected()}
+              className="h-12 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white shadow-[0_10px_20px_rgba(239,99,81,0.24)]"
+            >
+              선택한 시간 예약하기
+            </button>
+          </div>
+        ) : (
+          <EmptyText text="예약할 시간대를 여러 개 선택한 뒤 한 번에 예약할 수 있습니다." />
+        )}
+      </MobilePanel>
+
       <div className="space-y-3">
         {timeBands.map((band) => {
           const bandSlots = slots.filter((slot) => {
@@ -1478,7 +1615,13 @@ function SuggestionsTab({
             <MobilePanel key={band.id} title={`${band.label} ${band.range}`}>
               <div className="space-y-2">
                 {bandSlots.map((slot) => (
-                  <BookingSlotRow key={slot.time} slot={slot} teamSize={selectedTeam.members.length} onReserve={onReserve} />
+                  <BookingSlotRow
+                    key={slot.time}
+                    slot={slot}
+                    teamSize={selectedTeam.members.length}
+                    isSelected={selectedTimes.includes(slot.time)}
+                    onToggle={onToggleSlot}
+                  />
                 ))}
               </div>
             </MobilePanel>
@@ -1492,11 +1635,13 @@ function SuggestionsTab({
 function BookingSlotRow({
   slot,
   teamSize,
-  onReserve,
+  isSelected,
+  onToggle,
 }: {
   slot: BookingSlot;
   teamSize: number;
-  onReserve: (slot: BookingSlot) => Promise<void>;
+  isSelected: boolean;
+  onToggle: (time: string) => void;
 }) {
   const disabled = slot.status === "reserved" || slot.status === "unavailable";
   const statusLabel =
@@ -1511,7 +1656,7 @@ function BookingSlotRow({
           : "bg-rose-50 text-rose-700";
 
   return (
-    <div className="rounded-lg border border-[#f0ded7] bg-white p-3">
+    <div className={`rounded-lg border p-3 ${isSelected ? "border-[#ff665a] bg-[#fff8f4]" : "border-[#f0ded7] bg-white"}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold">
@@ -1539,12 +1684,16 @@ function BookingSlotRow({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => void onReserve(slot)}
+        onClick={() => onToggle(slot.time)}
         className={`mt-3 h-10 w-full rounded-lg text-sm font-semibold ${
-          disabled ? "bg-slate-100 text-slate-400" : "bg-[#ff665a] text-white"
+          disabled
+            ? "bg-slate-100 text-slate-400"
+            : isSelected
+              ? "border border-[#ff665a] bg-white text-[#be3d33]"
+              : "bg-[#ff665a] text-white"
         }`}
       >
-        {slot.status === "reserved" ? "이미 예약됨" : slot.status === "unavailable" ? "예약 불가" : "30분 예약"}
+        {slot.status === "reserved" ? "이미 예약됨" : slot.status === "unavailable" ? "예약 불가" : isSelected ? "선택 해제" : "선택"}
       </button>
     </div>
   );

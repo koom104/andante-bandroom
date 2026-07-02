@@ -60,7 +60,7 @@ create table if not exists public.bookings (
     and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) >= 600
     and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) < 1440
   ),
-  duration numeric(3,1) not null check (duration in (0.5, 1, 1.5, 2)),
+  duration numeric(4,1) not null check (duration > 0 and duration * 2 = floor(duration * 2)),
   purpose text not null,
   status text not null default 'confirmed' check (status in ('confirmed', 'cancelled')),
   created_by uuid references public.profiles(id),
@@ -360,8 +360,8 @@ begin
     raise exception '예약 시간은 10:00부터 24:00 사이여야 합니다.';
   end if;
 
-  if p_duration not in (0.5, 1, 1.5, 2) then
-    raise exception '예약 길이는 30분, 1시간, 1시간 30분, 2시간이어야 합니다.';
+  if p_duration is null or p_duration <= 0 or p_duration * 2 <> floor(p_duration * 2) then
+    raise exception '예약 길이는 30분 단위여야 합니다.';
   end if;
 
   requested_end := requested_start + (p_duration * 60)::integer;
@@ -406,6 +406,49 @@ begin
   values (auth.uid(), 'create_booking', 'booking', new_booking_id, coalesce(p_booking_date::text, p_day) || ' ' || p_start_time);
 
   return new_booking_id;
+end;
+$$;
+
+create or replace function public.create_bookings(
+  p_team_id uuid,
+  p_day text,
+  p_booking_date date,
+  p_purpose text,
+  p_groups jsonb
+)
+returns uuid[]
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  group_item jsonb;
+  new_booking_id uuid;
+  new_booking_ids uuid[] := '{}';
+  group_start_time text;
+  group_duration numeric;
+begin
+  if p_groups is null or jsonb_typeof(p_groups) <> 'array' or jsonb_array_length(p_groups) = 0 then
+    raise exception '예약할 시간대가 없습니다.';
+  end if;
+
+  for group_item in select value from jsonb_array_elements(p_groups)
+  loop
+    group_start_time := group_item->>'start_time';
+    group_duration := (group_item->>'duration')::numeric;
+
+    new_booking_id := public.create_booking(
+      p_team_id,
+      p_day,
+      group_start_time,
+      group_duration,
+      p_purpose,
+      p_booking_date
+    );
+    new_booking_ids := array_append(new_booking_ids, new_booking_id);
+  end loop;
+
+  return new_booking_ids;
 end;
 $$;
 
@@ -591,6 +634,7 @@ with check (public.is_admin(auth.uid()) or actor_id = auth.uid());
 
 grant execute on function public.create_team(text, text, uuid, jsonb) to authenticated;
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date) to authenticated;
+grant execute on function public.create_bookings(uuid, text, date, text, jsonb) to authenticated;
 grant execute on function public.cancel_booking(uuid, text) to authenticated;
 
 insert into public.news_items (title, body, tag)
