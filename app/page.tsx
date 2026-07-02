@@ -3,12 +3,13 @@
 import { useMemo, useState } from "react";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토";
-type Tab = "booking" | "suggestions" | "schedule" | "news";
+type Tab = "booking" | "suggestions" | "schedule" | "team" | "news";
+type Session = "보컬" | "리드기타" | "세컨기타" | "어쿠스틱" | "드럼" | "피아노" | "신디";
 
 type Member = {
   id: string;
   name: string;
-  role: string;
+  role: Session;
 };
 
 type Team = {
@@ -17,6 +18,7 @@ type Team = {
   song: string;
   color: string;
   accent: string;
+  leaderId: string;
   members: Member[];
   busy: Record<string, string[]>;
 };
@@ -42,22 +44,47 @@ type Suggestion = {
   reason: string;
 };
 
+type MemberDraft = {
+  id: string;
+  name: string;
+  role: Session;
+};
+
+type NewTeamPayload = {
+  teamName: string;
+  song: string;
+  leaderName: string;
+  leaderRole: Session;
+  members: MemberDraft[];
+};
+
 const days: Day[] = ["월", "화", "수", "목", "금", "토"];
 const timeSlots = ["15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
+const sessionOptions: Session[] = ["보컬", "리드기타", "세컨기타", "어쿠스틱", "드럼", "피아노", "신디"];
 
-const teams: Team[] = [
+const colorPalette = [
+  { color: "bg-red-600", accent: "#ef6351" },
+  { color: "bg-blue-600", accent: "#2563eb" },
+  { color: "bg-emerald-600", accent: "#059669" },
+  { color: "bg-violet-600", accent: "#7c3aed" },
+  { color: "bg-amber-600", accent: "#d97706" },
+  { color: "bg-slate-700", accent: "#334155" },
+];
+
+const defaultTeams: Team[] = [
   {
     id: "afterglow",
     name: "Afterglow",
     song: "축제 오프닝 3곡",
     color: "bg-red-600",
     accent: "#ef6351",
+    leaderId: "minseo",
     members: [
       { id: "minseo", name: "민서", role: "보컬" },
-      { id: "jiho", name: "지호", role: "기타" },
-      { id: "yuna", name: "유나", role: "베이스" },
+      { id: "jiho", name: "지호", role: "리드기타" },
+      { id: "yuna", name: "유나", role: "세컨기타" },
       { id: "taeho", name: "태호", role: "드럼" },
-      { id: "arin", name: "아린", role: "키보드" },
+      { id: "arin", name: "아린", role: "신디" },
     ],
     busy: {
       minseo: ["월-17:00", "화-18:00", "수-19:00", "목-18:00", "금-16:00"],
@@ -73,11 +100,12 @@ const teams: Team[] = [
     song: "어쿠스틱 커버 세트",
     color: "bg-blue-600",
     accent: "#2563eb",
+    leaderId: "seojun",
     members: [
       { id: "seojun", name: "서준", role: "보컬" },
-      { id: "haru", name: "하루", role: "기타" },
-      { id: "narin", name: "나린", role: "카혼" },
-      { id: "doha", name: "도하", role: "건반" },
+      { id: "haru", name: "하루", role: "어쿠스틱" },
+      { id: "narin", name: "나린", role: "드럼" },
+      { id: "doha", name: "도하", role: "피아노" },
     ],
     busy: {
       seojun: ["월-16:00", "화-19:00", "목-18:00"],
@@ -92,10 +120,11 @@ const teams: Team[] = [
     song: "자작곡 편곡",
     color: "bg-emerald-600",
     accent: "#059669",
+    leaderId: "sian",
     members: [
       { id: "sian", name: "시안", role: "보컬" },
-      { id: "june", name: "준", role: "기타" },
-      { id: "rio", name: "리오", role: "베이스" },
+      { id: "june", name: "준", role: "리드기타" },
+      { id: "rio", name: "리오", role: "세컨기타" },
       { id: "haeun", name: "하은", role: "드럼" },
     ],
     busy: {
@@ -168,10 +197,11 @@ const tabs: Array<{ id: Tab; label: string; short: string }> = [
   { id: "booking", label: "예약", short: "R" },
   { id: "suggestions", label: "추천", short: "A" },
   { id: "schedule", label: "시간표", short: "T" },
+  { id: "team", label: "팀", short: "+" },
   { id: "news", label: "소식", short: "N" },
 ];
 
-function toBusyByTeam() {
+function toBusyByTeam(teams: Team[]) {
   return Object.fromEntries(teams.map((team) => [team.id, team.busy])) as Record<
     string,
     Record<string, string[]>
@@ -205,6 +235,15 @@ function findReservation(reservations: Reservation[], day: Day, time: string) {
 
 function isOpenWindow(reservations: Reservation[], day: Day, start: string, duration: number) {
   return reservationSlots(start, duration).every((time) => !findReservation(reservations, day, time));
+}
+
+function makeId(prefix: string, value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `${prefix}-${normalized || "item"}-${Date.now().toString(36)}`;
 }
 
 function buildSuggestions(
@@ -253,10 +292,11 @@ function buildSuggestions(
 }
 
 export default function Home() {
-  const [selectedTeamId, setSelectedTeamId] = useState(teams[0].id);
-  const [selectedMemberId, setSelectedMemberId] = useState(teams[0].members[0].id);
+  const [teams, setTeams] = useState(defaultTeams);
+  const [selectedTeamId, setSelectedTeamId] = useState(defaultTeams[0].id);
+  const [selectedMemberId, setSelectedMemberId] = useState(defaultTeams[0].members[0].id);
   const [duration, setDuration] = useState(2);
-  const [busyByTeam, setBusyByTeam] = useState(toBusyByTeam);
+  const [busyByTeam, setBusyByTeam] = useState(() => toBusyByTeam(defaultTeams));
   const [reservations, setReservations] = useState(initialReservations);
   const [draft, setDraft] = useState<Suggestion | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("booking");
@@ -264,7 +304,10 @@ export default function Home() {
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0];
   const selectedMember = selectedTeam.members.find((member) => member.id === selectedMemberId) ?? selectedTeam.members[0];
-  const busy = busyByTeam[selectedTeam.id];
+  const busy = useMemo(
+    () => busyByTeam[selectedTeam.id] ?? {},
+    [busyByTeam, selectedTeam.id],
+  );
 
   const suggestions = useMemo(
     () => buildSuggestions(selectedTeam, busy, reservations, duration),
@@ -288,7 +331,7 @@ export default function Home() {
   function toggleBusy(day: Day, time: string) {
     const key = slotKey(day, time);
     setBusyByTeam((current) => {
-      const teamBusy = current[selectedTeam.id];
+      const teamBusy = current[selectedTeam.id] ?? {};
       const memberBusy = teamBusy[selectedMember.id] ?? [];
       const nextMemberBusy = memberBusy.includes(key)
         ? memberBusy.filter((item) => item !== key)
@@ -310,6 +353,53 @@ export default function Home() {
     setDraft(suggestion);
     setActiveTab("suggestions");
     setStatus(`${suggestion.day}요일 ${suggestion.start} 추천을 선택했어요.`);
+  }
+
+  function addTeam(payload: NewTeamPayload) {
+    const leaderId = makeId("member", payload.leaderName);
+    const memberList: Member[] = [
+      {
+        id: leaderId,
+        name: payload.leaderName.trim(),
+        role: payload.leaderRole,
+      },
+      ...payload.members.map((member) => ({
+        id: makeId("member", member.name),
+        name: member.name,
+        role: member.role,
+      })),
+    ];
+    const palette = colorPalette[teams.length % colorPalette.length];
+    const teamId = makeId("team", payload.teamName);
+    const team: Team = {
+      id: teamId,
+      name: payload.teamName.trim(),
+      song: payload.song.trim() || "새 합주 준비",
+      color: palette.color,
+      accent: palette.accent,
+      leaderId,
+      members: memberList,
+      busy: Object.fromEntries(memberList.map((member) => [member.id, []])),
+    };
+
+    setTeams((current) => [...current, team]);
+    setBusyByTeam((current) => ({
+      ...current,
+      [team.id]: team.busy,
+    }));
+    setSelectedTeamId(team.id);
+    setSelectedMemberId(leaderId);
+    setDraft(null);
+    setActiveTab("booking");
+    setStatus(`${team.name} 팀이 추가됐어요. 팀장 ${payload.leaderName.trim()} 기준으로 추천을 시작합니다.`);
+  }
+
+  function handlePrimaryAction() {
+    if (activeTab === "team") {
+      setActiveTab("booking");
+      return;
+    }
+    reserveDraft();
   }
 
   function reserveDraft() {
@@ -342,6 +432,13 @@ export default function Home() {
     setActiveTab("booking");
   }
 
+  const primaryLabel =
+    activeTab === "team"
+      ? "예약 화면으로 돌아가기"
+      : draft
+        ? `${draft.day} ${draft.start} 예약 요청`
+        : "AI 추천 시간 선택하기";
+
   return (
     <main className="h-screen overflow-hidden bg-[#f9ebe6] px-4 py-5 text-slate-950 sm:px-6">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center gap-10 lg:justify-between">
@@ -351,8 +448,7 @@ export default function Home() {
             밴드부 합주실 예약을 휴대폰 앱처럼 빠르게.
           </h1>
           <p className="mt-4 text-base leading-7 text-slate-600">
-            팀 시간표, 기존 예약, 동아리 소식을 한 화면 흐름 안에 묶었습니다. 공모전 심사자가 바로 눌러볼 수 있는
-            모바일 프로토타입입니다.
+            팀 생성, 팀장 지정, 세션별 멤버 관리, 시간표 추천까지 한 화면 흐름 안에 묶은 모바일 프로토타입입니다.
           </p>
         </section>
 
@@ -369,6 +465,7 @@ export default function Home() {
               <div className="flex-1 overflow-y-auto px-4 pb-32 pt-3">
                 {activeTab === "booking" && (
                   <BookingTab
+                    teams={teams}
                     selectedTeam={selectedTeam}
                     reservations={reservations}
                     suggestions={suggestions}
@@ -402,20 +499,20 @@ export default function Home() {
                   />
                 )}
 
-                {activeTab === "news" && (
-                  <NewsTab newsItems={news} reservations={upcomingReservations} />
-                )}
+                {activeTab === "team" && <TeamTab teams={teams} onAddTeam={addTeam} />}
+
+                {activeTab === "news" && <NewsTab newsItems={news} reservations={upcomingReservations} />}
               </div>
 
               <div className="absolute inset-x-0 bottom-0 border-t border-[#f0ded7] bg-[#fff8f4]/95 px-4 pb-3 pt-3 backdrop-blur">
                 <button
                   type="button"
-                  onClick={reserveDraft}
+                  onClick={handlePrimaryAction}
                   className="flex h-12 w-full items-center justify-center rounded-lg bg-[#ff665a] text-sm font-semibold text-white shadow-[0_10px_20px_rgba(239,99,81,0.28)] transition hover:bg-[#ef5548]"
                 >
-                  {draft ? `${draft.day} ${draft.start} 예약 요청` : "AI 추천 시간 선택하기"}
+                  {primaryLabel}
                 </button>
-                <nav className="mt-3 grid grid-cols-4 gap-1" aria-label="앱 탭">
+                <nav className="mt-3 grid grid-cols-5 gap-1" aria-label="앱 탭">
                   {tabs.map((tab) => (
                     <button
                       key={tab.id}
@@ -471,6 +568,7 @@ function AppHeader({ selectedTeam, status }: { selectedTeam: Team; status: strin
 }
 
 function BookingTab({
+  teams,
   selectedTeam,
   reservations,
   suggestions,
@@ -480,6 +578,7 @@ function BookingTab({
   changeTeam,
   selectSuggestion,
 }: {
+  teams: Team[];
   selectedTeam: Team;
   reservations: Reservation[];
   suggestions: Suggestion[];
@@ -489,6 +588,8 @@ function BookingTab({
   changeTeam: (teamId: string) => void;
   selectSuggestion: (suggestion: Suggestion) => void;
 }) {
+  const leader = selectedTeam.members.find((member) => member.id === selectedTeam.leaderId);
+
   return (
     <div className="space-y-3">
       <MobilePanel>
@@ -497,6 +598,11 @@ function BookingTab({
             <p className="text-xs font-semibold text-slate-500">현재 팀</p>
             <h3 className="mt-1 text-xl font-semibold">{selectedTeam.name}</h3>
             <p className="mt-1 text-sm text-slate-500">{selectedTeam.song}</p>
+            {leader && (
+              <p className="mt-2 text-xs font-semibold text-[#be3d33]">
+                팀장 {leader.name} · {leader.role}
+              </p>
+            )}
           </div>
           <div className="rounded-lg bg-[#fff0eb] px-3 py-2 text-right">
             <p className="text-xs text-slate-500">최고 참여</p>
@@ -665,6 +771,8 @@ function ScheduleInputTab({
   busy: Record<string, string[]>;
   toggleBusy: (day: Day, time: string) => void;
 }) {
+  const leaderId = selectedTeam.leaderId;
+
   return (
     <div className="space-y-3">
       <MobilePanel>
@@ -683,7 +791,10 @@ function ScheduleInputTab({
                 selectedMemberId === member.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
               }`}
             >
-              <span className="block font-semibold">{member.name}</span>
+              <span className="block font-semibold">
+                {member.name}
+                {member.id === leaderId ? " 팀장" : ""}
+              </span>
               <span className={selectedMemberId === member.id ? "text-slate-300" : "text-slate-500"}>{member.role}</span>
             </button>
           ))}
@@ -709,6 +820,226 @@ function ScheduleInputTab({
         </div>
       </MobilePanel>
     </div>
+  );
+}
+
+function TeamTab({ teams, onAddTeam }: { teams: Team[]; onAddTeam: (payload: NewTeamPayload) => void }) {
+  const [teamName, setTeamName] = useState("");
+  const [song, setSong] = useState("");
+  const [leaderName, setLeaderName] = useState("");
+  const [leaderRole, setLeaderRole] = useState<Session>("보컬");
+  const [memberName, setMemberName] = useState("");
+  const [memberRole, setMemberRole] = useState<Session>("리드기타");
+  const [members, setMembers] = useState<MemberDraft[]>([]);
+  const [message, setMessage] = useState("팀장과 멤버의 세션을 지정해 새 팀을 만들 수 있어요.");
+
+  function addMemberDraft() {
+    const trimmedName = memberName.trim();
+    if (!trimmedName) {
+      setMessage("추가할 멤버 이름을 입력해 주세요.");
+      return;
+    }
+    setMembers((current) => [
+      ...current,
+      {
+        id: makeId("draft", trimmedName),
+        name: trimmedName,
+        role: memberRole,
+      },
+    ]);
+    setMemberName("");
+    setMemberRole("리드기타");
+    setMessage(`${trimmedName} 멤버가 추가 목록에 들어갔어요.`);
+  }
+
+  function removeDraft(id: string) {
+    setMembers((current) => current.filter((member) => member.id !== id));
+  }
+
+  function submitTeam() {
+    const trimmedTeamName = teamName.trim();
+    const trimmedLeaderName = leaderName.trim();
+
+    if (!trimmedTeamName) {
+      setMessage("팀 이름을 먼저 입력해 주세요.");
+      return;
+    }
+    if (!trimmedLeaderName) {
+      setMessage("팀장을 맡을 멤버 이름을 입력해 주세요.");
+      return;
+    }
+    if (teams.some((team) => team.name.toLowerCase() === trimmedTeamName.toLowerCase())) {
+      setMessage("이미 같은 이름의 팀이 있어요.");
+      return;
+    }
+
+    onAddTeam({
+      teamName: trimmedTeamName,
+      song,
+      leaderName: trimmedLeaderName,
+      leaderRole,
+      members,
+    });
+    setTeamName("");
+    setSong("");
+    setLeaderName("");
+    setLeaderRole("보컬");
+    setMembers([]);
+    setMessage("팀이 추가됐어요. 예약 화면에서 바로 확인할 수 있습니다.");
+  }
+
+  return (
+    <div className="space-y-3">
+      <MobilePanel>
+        <p className="text-xs font-semibold text-[#ef6351]">팀 추가</p>
+        <h3 className="mt-1 text-xl font-semibold">새 합주 팀 만들기</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          팀장을 먼저 정하고, 멤버를 추가하면서 각 멤버의 세션을 지정합니다.
+        </p>
+        <p className="mt-3 rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">{message}</p>
+      </MobilePanel>
+
+      <MobilePanel title="팀 정보">
+        <div className="space-y-3">
+          <LabeledInput label="팀 이름" value={teamName} onChange={setTeamName} placeholder="예: Midnight Jam" />
+          <LabeledInput label="합주 목표" value={song} onChange={setSong} placeholder="예: 학교 축제 엔딩곡" />
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="팀장 지정">
+        <div className="space-y-3">
+          <LabeledInput label="팀장 이름" value={leaderName} onChange={setLeaderName} placeholder="팀장 이름" />
+          <SessionSelect label="팀장 세션" value={leaderRole} onChange={setLeaderRole} />
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="멤버 추가">
+        <div className="space-y-3">
+          <LabeledInput label="멤버 이름" value={memberName} onChange={setMemberName} placeholder="멤버 이름" />
+          <SessionSelect label="멤버 세션" value={memberRole} onChange={setMemberRole} />
+          <button
+            type="button"
+            onClick={addMemberDraft}
+            className="h-10 w-full rounded-lg border border-slate-950 bg-slate-950 text-sm font-semibold text-white"
+          >
+            멤버 추가
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {members.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-[#f0ded7] bg-white p-3 text-xs leading-5 text-slate-500">
+              추가 멤버가 없으면 팀장 1명만 있는 팀으로도 만들 수 있어요.
+            </p>
+          ) : (
+            members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between rounded-lg border border-[#f0ded7] bg-white p-3">
+                <div>
+                  <p className="text-sm font-semibold">{member.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">{member.role}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeDraft(member.id)}
+                  className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600"
+                >
+                  삭제
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </MobilePanel>
+
+      <button
+        type="button"
+        onClick={submitTeam}
+        className="h-12 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white shadow-[0_10px_20px_rgba(239,99,81,0.24)]"
+      >
+        팀 등록하기
+      </button>
+
+      <MobilePanel title="등록된 팀">
+        <div className="space-y-2">
+          {teams.map((team) => {
+            const leader = team.members.find((member) => member.id === team.leaderId);
+
+            return (
+              <div key={team.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">{team.name}</p>
+                    <p className="mt-1 text-xs text-slate-500">{team.song}</p>
+                  </div>
+                  <span className={`h-3 w-3 rounded-sm ${team.color}`} />
+                </div>
+                <p className="mt-2 text-xs font-semibold text-[#be3d33]">
+                  팀장 {leader?.name ?? "-"} · {leader?.role ?? "-"}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {team.members.map((member) => (
+                    <span key={member.id} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                      {member.name} · {member.role}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </MobilePanel>
+    </div>
+  );
+}
+
+function LabeledInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
+      />
+    </label>
+  );
+}
+
+function SessionSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: Session;
+  onChange: (value: Session) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as Session)}
+        className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
+      >
+        {sessionOptions.map((session) => (
+          <option key={session} value={session}>
+            {session}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
