@@ -8,8 +8,6 @@ export const SUPABASE_URL =
 export const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_dKyziP5Nq6fTyZWkUd5OQQ_D5oyYD2P";
 
-export const ADMIN_EMAIL = "k91372960@gmail.com";
-
 export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
     autoRefreshToken: true,

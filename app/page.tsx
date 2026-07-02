@@ -2,7 +2,7 @@
 
 import type { Session as SupabaseSession } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ADMIN_EMAIL, supabase } from "./supabase";
+import { supabase } from "./supabase";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토";
 type Tab = "booking" | "suggestions" | "my" | "team" | "news" | "admin";
@@ -990,7 +990,7 @@ function AuthScreen({
   notice: string;
 }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState(ADMIN_EMAIL);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [cohort, setCohort] = useState("");
