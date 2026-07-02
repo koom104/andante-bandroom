@@ -56,6 +56,7 @@ type Suggestion = {
   end: string;
   available: Member[];
   absent: Member[];
+  absentReasons: Record<string, string>;
   score: number;
   isAllIn: boolean;
   reason: string;
@@ -140,6 +141,7 @@ function isOpenWindow(reservations: Reservation[], day: Day, start: string, dura
 function buildSuggestions(
   team: Team,
   busy: Record<string, string[]>,
+  rehearsalBusy: Record<string, string[]>,
   reservations: Reservation[],
   duration: number,
 ) {
@@ -154,15 +156,34 @@ function buildSuggestions(
         continue;
       }
 
-      const available = team.members.filter((member) =>
-        slots.every((slot) => !busy[member.id]?.includes(slotKey(day, slot))),
-      );
+      const absentReasons: Record<string, string> = {};
+      const available = team.members.filter((member) => {
+        const manualBusy = busy[member.id] ?? [];
+        const rehearsalSlots = rehearsalBusy[member.id] ?? [];
+        const blockedByRehearsal = slots.some((slot) => rehearsalSlots.includes(slotKey(day, slot)));
+        const blockedManually = slots.some((slot) => manualBusy.includes(slotKey(day, slot)));
+
+        if (blockedByRehearsal) {
+          absentReasons[member.id] = "합주 있음";
+          return false;
+        }
+
+        if (blockedManually) {
+          absentReasons[member.id] = "불가";
+          return false;
+        }
+
+        return true;
+      });
       const absent = team.members.filter((member) => !available.includes(member));
       const eveningBonus = hourOf(start) >= 18 && hourOf(start) <= 20 ? 8 : 0;
       const weekendPenalty = day === "토" ? 3 : 0;
       const score = available.length * 100 + eveningBonus - weekendPenalty - index;
       const isAllIn = absent.length === 0;
-      const absentText = absent.length > 0 ? absent.map((member) => member.name).join(", ") : "없음";
+      const absentText =
+        absent.length > 0
+          ? absent.map((member) => `${member.name} ${absentReasons[member.id] ?? "불가"}`).join(", ")
+          : "없음";
 
       candidates.push({
         day,
@@ -170,6 +191,7 @@ function buildSuggestions(
         end: addHours(start, duration),
         available,
         absent,
+        absentReasons,
         score,
         isAllIn,
         reason: isAllIn
@@ -200,6 +222,7 @@ export default function Home() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [busyByUser, setBusyByUser] = useState<Record<string, string[]>>({});
+  const [rehearsalByUser, setRehearsalByUser] = useState<Record<string, string[]>>({});
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState("");
@@ -312,6 +335,11 @@ export default function Home() {
       color_index: number;
     }>;
 
+    const teamMembersByTeam = new Map<string, string[]>();
+    for (const row of memberRows) {
+      teamMembersByTeam.set(row.team_id, [...(teamMembersByTeam.get(row.team_id) ?? []), row.user_id]);
+    }
+
     const nextTeams = rawTeams
       .map((team, index) => {
         const palette = colorPalette[(team.color_index ?? index) % colorPalette.length];
@@ -346,7 +374,7 @@ export default function Home() {
       })
       .filter((team) => profile.role === "admin" || team.members.some((member) => member.id === profile.id));
 
-    const teamNameById = new Map(nextTeams.map((team) => [team.id, team.name]));
+    const teamNameById = new Map(rawTeams.map((team) => [team.id, team.name]));
     const bookingRows = (bookingResult.data ?? []) as Array<{
       id: string;
       team_id: string;
@@ -357,11 +385,7 @@ export default function Home() {
       status: "confirmed" | "cancelled";
     }>;
 
-    setProfiles(nextProfiles);
-    setBusyByUser(scheduleMap);
-    setTeams(nextTeams);
-    setReservations(
-      bookingRows.map((booking) => ({
+    const nextReservations = bookingRows.map((booking) => ({
         id: booking.id,
         teamId: booking.team_id,
         teamName: teamNameById.get(booking.team_id) ?? "삭제된 팀",
@@ -370,8 +394,27 @@ export default function Home() {
         duration: booking.duration,
         purpose: booking.purpose,
         status: booking.status,
-      })),
-    );
+    }));
+    const rehearsalMap: Record<string, string[]> = {};
+    for (const booking of nextReservations) {
+      if (booking.status !== "confirmed") {
+        continue;
+      }
+
+      const memberIds = teamMembersByTeam.get(booking.teamId) ?? [];
+      for (const memberId of memberIds) {
+        rehearsalMap[memberId] = [
+          ...(rehearsalMap[memberId] ?? []),
+          ...reservationSlots(booking.start, booking.duration).map((slot) => slotKey(booking.day, slot)),
+        ];
+      }
+    }
+
+    setProfiles(nextProfiles);
+    setBusyByUser(scheduleMap);
+    setRehearsalByUser(rehearsalMap);
+    setTeams(nextTeams);
+    setReservations(nextReservations);
     setNewsItems((newsResult.data ?? []) as NewsItem[]);
     setIsLoadingData(false);
   }, [profile]);
@@ -396,6 +439,8 @@ export default function Home() {
         setProfile(null);
         setTeams([]);
         setProfiles([]);
+        setBusyByUser({});
+        setRehearsalByUser({});
         setReservations([]);
         setNewsItems([]);
         setIsBooting(false);
@@ -430,13 +475,17 @@ export default function Home() {
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
   const busy = useMemo(() => selectedTeam?.busy ?? emptyBusy, [selectedTeam]);
+  const selectedTeamRehearsals = useMemo(
+    () => Object.fromEntries((selectedTeam?.members ?? []).map((member) => [member.id, rehearsalByUser[member.id] ?? []])),
+    [selectedTeam, rehearsalByUser],
+  );
   const visibleTabs = profile?.role === "admin" ? [...baseTabs, adminTab] : baseTabs;
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
 
   const suggestions = useMemo(
-    () => (selectedTeam ? buildSuggestions(selectedTeam, busy, reservations, duration) : []),
-    [selectedTeam, busy, reservations, duration],
+    () => (selectedTeam ? buildSuggestions(selectedTeam, busy, selectedTeamRehearsals, reservations, duration) : []),
+    [selectedTeam, busy, selectedTeamRehearsals, reservations, duration],
   );
 
   const topSuggestion = suggestions[0];
@@ -688,28 +737,33 @@ export default function Home() {
       return;
     }
 
-    const { error } = await supabase
-      .from("bookings")
-      .update({
-        status: "cancelled",
-        cancelled_by: profile.id,
-        cancelled_at: new Date().toISOString(),
-        cancel_reason: reason || "관리자 취소",
-      })
-      .eq("id", bookingId);
+    const { error } = await supabase.rpc("cancel_booking", {
+      p_booking_id: bookingId,
+      p_reason: reason || "예약 취소",
+    });
 
     if (error) {
-      setStatus(getErrorMessage(error));
-      return;
-    }
+      const message = getErrorMessage(error);
+      if (profile.role === "admin" && message.includes("cancel_booking")) {
+        const fallback = await supabase
+          .from("bookings")
+          .update({
+            status: "cancelled",
+            cancelled_by: profile.id,
+            cancelled_at: new Date().toISOString(),
+            cancel_reason: reason || "관리자 취소",
+          })
+          .eq("id", bookingId);
 
-    await supabase.from("audit_logs").insert({
-      actor_id: profile.id,
-      action: "cancel_booking",
-      target_type: "booking",
-      target_id: bookingId,
-      reason: reason || "관리자 취소",
-    });
+        if (fallback.error) {
+          setStatus(getErrorMessage(fallback.error));
+          return;
+        }
+      } else {
+        setStatus(message);
+        return;
+      }
+    }
 
     setStatus("예약을 취소했어요.");
     await refreshData();
@@ -765,16 +819,9 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-[#f9ebe6] px-4 py-5 text-slate-950 sm:px-6">
+    <main className="h-screen overflow-hidden bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
-        <section className="relative w-full max-w-[430px]">
-          <div className="absolute -left-8 top-20 hidden h-28 w-28 rounded-full bg-[#ffd7cc] blur-3xl sm:block" />
-          <div className="absolute -right-8 bottom-20 hidden h-32 w-32 rounded-full bg-[#ffe7a8] blur-3xl sm:block" />
-
-          <div className="relative rounded-[42px] border-[10px] border-slate-950 bg-slate-950 shadow-2xl">
-            <div className="absolute left-1/2 top-0 z-20 h-5 w-28 -translate-x-1/2 rounded-b-2xl bg-slate-950" />
-            <div className="relative flex h-[calc(100vh-60px)] min-h-[620px] max-h-[820px] flex-col overflow-hidden rounded-[30px] bg-[#fff8f4]">
-              <PhoneStatusBar />
+        <section className="relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
               <AppHeader selectedTeam={selectedTeam} status={status} profile={profile} onSignOut={signOut} />
 
               <div className="flex-1 overflow-y-auto px-4 pb-32 pt-3">
@@ -796,6 +843,8 @@ export default function Home() {
                     changeTeam={changeTeam}
                     selectSuggestion={selectSuggestion}
                     openTeamTab={() => setActiveTab("team")}
+                    currentUserId={profile.id}
+                    onCancelBooking={cancelBooking}
                   />
                 )}
 
@@ -816,6 +865,7 @@ export default function Home() {
                     selectedTeam={selectedTeam}
                     teams={teams}
                     ownBusy={busyByUser[profile.id] ?? []}
+                    ownRehearsals={rehearsalByUser[profile.id] ?? []}
                     changeTeam={changeTeam}
                     toggleBusy={(day, time) => toggleSchedule(profile.id, day, time)}
                   />
@@ -834,6 +884,7 @@ export default function Home() {
                     reservations={upcomingReservations}
                     newsItems={newsItems}
                     busyByUser={busyByUser}
+                    rehearsalByUser={rehearsalByUser}
                     approveProfile={approveProfile}
                     addNews={addNews}
                     deleteNews={deleteNews}
@@ -867,8 +918,6 @@ export default function Home() {
                   ))}
                 </nav>
               </div>
-            </div>
-          </div>
         </section>
       </div>
     </main>
@@ -877,31 +926,13 @@ export default function Home() {
 
 function PhoneShell({ children }: { children: ReactNode }) {
   return (
-    <main className="h-screen overflow-hidden bg-[#f9ebe6] px-4 py-5 text-slate-950 sm:px-6">
+    <main className="h-screen overflow-hidden bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
-        <section className="relative w-full max-w-[430px]">
-          <div className="relative rounded-[42px] border-[10px] border-slate-950 bg-slate-950 shadow-2xl">
-            <div className="absolute left-1/2 top-0 z-20 h-5 w-28 -translate-x-1/2 rounded-b-2xl bg-slate-950" />
-            <div className="relative flex h-[calc(100vh-60px)] min-h-[620px] max-h-[820px] flex-col overflow-hidden rounded-[30px] bg-[#fff8f4]">
-              <PhoneStatusBar />
-              <div className="flex-1 overflow-y-auto px-4 py-4">{children}</div>
-            </div>
-          </div>
+        <section className="relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
+          <div className="flex-1 overflow-y-auto px-4 py-4">{children}</div>
         </section>
       </div>
     </main>
-  );
-}
-
-function PhoneStatusBar() {
-  return (
-    <div className="flex h-9 shrink-0 items-end justify-between px-6 pb-2 text-[11px] font-semibold text-slate-900">
-      <span>9:41</span>
-      <div className="flex items-center gap-1">
-        <span className="h-2 w-3 rounded-sm border border-slate-900" />
-        <span className="h-2 w-4 rounded-sm bg-slate-900" />
-      </div>
-    </div>
   );
 }
 
@@ -1120,6 +1151,8 @@ function BookingTab({
   changeTeam,
   selectSuggestion,
   openTeamTab,
+  currentUserId,
+  onCancelBooking,
 }: {
   teams: Team[];
   selectedTeam: Team | null;
@@ -1131,6 +1164,8 @@ function BookingTab({
   changeTeam: (teamId: string) => void;
   selectSuggestion: (suggestion: Suggestion) => void;
   openTeamTab: () => void;
+  currentUserId: string;
+  onCancelBooking: (bookingId: string, reason: string) => Promise<void>;
 }) {
   if (!selectedTeam) {
     return (
@@ -1150,6 +1185,8 @@ function BookingTab({
   }
 
   const leader = selectedTeam.members.find((member) => member.id === selectedTeam.leaderId);
+  const isLeader = selectedTeam.leaderId === currentUserId;
+  const teamReservations = reservations.filter((reservation) => reservation.teamId === selectedTeam.id);
 
   return (
     <div className="space-y-3">
@@ -1228,6 +1265,31 @@ function BookingTab({
           ))}
         </div>
       </MobilePanel>
+
+      {isLeader && (
+        <MobilePanel title="팀장 예약 관리">
+          <div className="space-y-2">
+            {teamReservations.map((reservation) => (
+              <div key={reservation.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0ded7] bg-white p-3">
+                <div>
+                  <p className="text-sm font-semibold">
+                    {reservation.day} {reservation.start}-{addHours(reservation.start, reservation.duration)}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">{reservation.purpose}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onCancelBooking(reservation.id, "팀장 취소")}
+                  className="rounded-md bg-[#fff0eb] px-2 py-1 text-xs font-semibold text-[#be3d33]"
+                >
+                  취소
+                </button>
+              </div>
+            ))}
+            {teamReservations.length === 0 && <EmptyText text="취소할 예약이 없습니다." />}
+          </div>
+        </MobilePanel>
+      )}
 
       <MobilePanel title="추천 후보 미리보기">
         <div className="space-y-2">
@@ -1310,7 +1372,7 @@ function SuggestionsTab({
                 ))}
                 {suggestion.absent.map((member) => (
                   <span key={member.id} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">
-                    {member.name} 불가
+                    {member.name} {suggestion.absentReasons[member.id] ?? "불가"}
                   </span>
                 ))}
               </div>
@@ -1328,6 +1390,7 @@ function MyPageTab({
   selectedTeam,
   teams,
   ownBusy,
+  ownRehearsals,
   changeTeam,
   toggleBusy,
 }: {
@@ -1335,6 +1398,7 @@ function MyPageTab({
   selectedTeam: Team | null;
   teams: Team[];
   ownBusy: string[];
+  ownRehearsals: string[];
   changeTeam: (teamId: string) => void;
   toggleBusy: (day: Day, time: string) => void;
 }) {
@@ -1384,9 +1448,9 @@ function MyPageTab({
 
       <MobilePanel title="내 시간표 편집">
         <p className="mb-3 text-xs leading-5 text-slate-500">
-          불가능한 시간을 누르면 추천 시간이 바로 다시 계산됩니다.
+          직접 막은 시간은 불가로, 팀 예약으로 막힌 시간은 합주로 표시됩니다.
         </p>
-        <ScheduleGrid busy={ownBusy} onToggle={toggleBusy} />
+        <ScheduleGrid busy={ownBusy} rehearsals={ownRehearsals} onToggle={toggleBusy} />
       </MobilePanel>
     </div>
   );
@@ -1576,6 +1640,7 @@ function AdminTab({
   reservations,
   newsItems,
   busyByUser,
+  rehearsalByUser,
   approveProfile,
   addNews,
   deleteNews,
@@ -1587,6 +1652,7 @@ function AdminTab({
   reservations: Reservation[];
   newsItems: NewsItem[];
   busyByUser: Record<string, string[]>;
+  rehearsalByUser: Record<string, string[]>;
   approveProfile: (profileId: string, nextStatus: "approved" | "rejected") => Promise<void>;
   addNews: (payload: { title: string; body: string; tag: string }) => Promise<void>;
   deleteNews: (newsId: string) => Promise<void>;
@@ -1684,7 +1750,7 @@ function AdminTab({
               <div>
                 <p className="text-sm font-semibold">{reservation.teamName}</p>
                 <p className="mt-1 text-xs text-slate-500">
-                  {reservation.day} {reservation.start} · {reservation.duration}시간
+                {reservation.day} {reservation.start} · {reservation.duration}시간
                 </p>
               </div>
               <button
@@ -1706,9 +1772,13 @@ function AdminTab({
           {selectedProfile ? (
             <>
               <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">
-                {selectedProfile.name} 부원의 불가 시간을 관리자 권한으로 수정합니다.
+                {selectedProfile.name} 부원의 불가 시간을 관리자 권한으로 수정합니다. 합주 시간은 예약 취소로만 풀립니다.
               </p>
-              <ScheduleGrid busy={busyByUser[selectedProfile.id] ?? []} onToggle={(day, time) => toggleSchedule(selectedProfile.id, day, time)} />
+              <ScheduleGrid
+                busy={busyByUser[selectedProfile.id] ?? []}
+                rehearsals={rehearsalByUser[selectedProfile.id] ?? []}
+                onToggle={(day, time) => toggleSchedule(selectedProfile.id, day, time)}
+              />
             </>
           ) : (
             <EmptyText text="승인된 부원이 없습니다." />
@@ -1959,9 +2029,11 @@ function SuggestionMiniRow({
 
 function ScheduleGrid({
   busy,
+  rehearsals = [],
   onToggle,
 }: {
   busy: string[];
+  rehearsals?: string[];
   onToggle: (day: Day, time: string) => void;
 }) {
   return (
@@ -1973,7 +2045,7 @@ function ScheduleGrid({
         </div>
       ))}
       {timeSlots.map((time) => (
-        <MemberScheduleRow key={time} time={time} busy={busy} onToggle={onToggle} />
+        <MemberScheduleRow key={time} time={time} busy={busy} rehearsals={rehearsals} onToggle={onToggle} />
       ))}
     </div>
   );
@@ -1982,10 +2054,12 @@ function ScheduleGrid({
 function MemberScheduleRow({
   time,
   busy,
+  rehearsals,
   onToggle,
 }: {
   time: string;
   busy: string[];
+  rehearsals: string[];
   onToggle: (day: Day, time: string) => void;
 }) {
   return (
@@ -1993,21 +2067,25 @@ function MemberScheduleRow({
       <div className="flex h-9 items-center text-[11px] font-semibold text-slate-500">{time}</div>
       {days.map((day) => {
         const key = slotKey(day, time);
+        const hasRehearsal = rehearsals.includes(key);
         const isBusy = busy.includes(key);
 
         return (
           <button
             key={key}
             type="button"
+            disabled={hasRehearsal}
             onClick={() => onToggle(day, time)}
             className={`h-9 rounded-md border text-[10px] font-semibold transition ${
-              isBusy
+              hasRehearsal
+                ? "border-amber-100 bg-amber-50 text-amber-800"
+                : isBusy
                 ? "border-[#ffb3aa] bg-[#fff0eb] text-[#be3d33]"
                 : "border-emerald-100 bg-emerald-50 text-emerald-700"
             }`}
-            aria-label={`${day} ${time} ${isBusy ? "불가" : "가능"}`}
+            aria-label={`${day} ${time} ${hasRehearsal ? "합주 있음" : isBusy ? "불가" : "가능"}`}
           >
-            {isBusy ? "불가" : "가능"}
+            {hasRehearsal ? "합주" : isBusy ? "불가" : "가능"}
           </button>
         );
       })}
