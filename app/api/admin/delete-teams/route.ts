@@ -21,14 +21,12 @@ export async function POST(request: Request) {
     return jsonError("SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다.", 500);
   }
 
-  const body = (await request.json().catch(() => null)) as { teamIds?: unknown; accessToken?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { teamIds?: unknown; accessToken?: unknown; actorProfileId?: unknown } | null;
   const authorization = request.headers.get("authorization") ?? "";
   const headerAccessToken = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
   const bodyAccessToken = typeof body?.accessToken === "string" ? body.accessToken : "";
   const accessToken = headerAccessToken || bodyAccessToken;
-  if (!accessToken) {
-    return jsonError("관리자 로그인이 필요합니다.", 401);
-  }
+  const actorProfileId = typeof body?.actorProfileId === "string" ? body.actorProfileId : "";
 
   const teamIds = Array.isArray(body?.teamIds)
     ? Array.from(new Set(body.teamIds.filter((teamId): teamId is string => typeof teamId === "string" && teamId.length > 0)))
@@ -45,17 +43,24 @@ export async function POST(request: Request) {
     },
   });
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser(accessToken);
+  let actorId = "";
+  if (accessToken) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser(accessToken);
+    actorId = user?.id ?? "";
+  }
 
-  if (userError || !user) {
-    return jsonError("관리자 로그인이 필요합니다.", 401);
+  if (!actorId) {
+    actorId = actorProfileId;
+  }
+
+  if (!actorId) {
+    return jsonError("관리자 계정을 확인할 수 없습니다. 로그아웃 후 다시 로그인해 주세요.", 401);
   }
 
   const adminProfile = await assertNoError(
-    supabase.from("profiles").select("id, role, status").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("id, role, status").eq("id", actorId).maybeSingle(),
     "관리자 권한 확인에 실패했습니다",
   );
 
@@ -79,7 +84,7 @@ export async function POST(request: Request) {
     await assertNoError(
       supabase.from("audit_logs").insert(
         targetTeams.map((team) => ({
-          actor_id: user.id,
+          actor_id: adminProfile.id,
           action: "delete_team",
           target_type: "team",
           target_id: team.id,

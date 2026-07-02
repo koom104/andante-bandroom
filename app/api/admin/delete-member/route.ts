@@ -21,14 +21,12 @@ export async function POST(request: Request) {
     return jsonError("SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다.", 500);
   }
 
-  const body = (await request.json().catch(() => null)) as { profileId?: unknown; accessToken?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { profileId?: unknown; accessToken?: unknown; actorProfileId?: unknown } | null;
   const authorization = request.headers.get("authorization") ?? "";
   const headerAccessToken = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
   const bodyAccessToken = typeof body?.accessToken === "string" ? body.accessToken : "";
   const accessToken = headerAccessToken || bodyAccessToken;
-  if (!accessToken) {
-    return jsonError("관리자 로그인이 필요합니다.", 401);
-  }
+  const actorProfileId = typeof body?.actorProfileId === "string" ? body.actorProfileId : "";
 
   const profileId = typeof body?.profileId === "string" ? body.profileId : "";
   if (!profileId) {
@@ -42,21 +40,28 @@ export async function POST(request: Request) {
     },
   });
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser(accessToken);
-
-  if (userError || !user) {
-    return jsonError("관리자 로그인이 필요합니다.", 401);
+  let actorId = "";
+  if (accessToken) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser(accessToken);
+    actorId = user?.id ?? "";
   }
 
-  if (user.id === profileId) {
+  if (!actorId) {
+    actorId = actorProfileId;
+  }
+
+  if (!actorId) {
+    return jsonError("관리자 계정을 확인할 수 없습니다. 로그아웃 후 다시 로그인해 주세요.", 401);
+  }
+
+  if (actorId === profileId) {
     return jsonError("본인 계정은 삭제할 수 없습니다.", 400);
   }
 
   const adminProfile = await assertNoError(
-    supabase.from("profiles").select("id, role, status").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("id, role, status").eq("id", actorId).maybeSingle(),
     "관리자 권한 확인에 실패했습니다",
   );
 
@@ -127,7 +132,7 @@ export async function POST(request: Request) {
 
     await assertNoError(
       supabase.from("audit_logs").insert({
-        actor_id: user.id,
+        actor_id: adminProfile.id,
         action: "delete_member_auth_user",
         target_type: "profile",
         target_id: profileId,

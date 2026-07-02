@@ -986,18 +986,14 @@ export default function Home() {
     }
 
     const accessToken = await getCurrentAccessToken();
-    if (!accessToken) {
-      setStatus("관리자 로그인이 필요합니다.");
-      return;
-    }
 
     const response = await fetch("/api/admin/delete-member", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
-      body: JSON.stringify({ profileId, accessToken }),
+      body: JSON.stringify({ profileId, accessToken, actorProfileId: profile.id }),
     });
 
     const result = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -1016,18 +1012,14 @@ export default function Home() {
     }
 
     const accessToken = await getCurrentAccessToken();
-    if (!accessToken) {
-      setStatus("관리자 로그인이 필요합니다.");
-      return;
-    }
 
     const response = await fetch("/api/admin/delete-teams", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
-      body: JSON.stringify({ teamIds, accessToken }),
+      body: JSON.stringify({ teamIds, accessToken, actorProfileId: profile.id }),
     });
 
     const result = (await response.json().catch(() => null)) as { error?: string; deletedCount?: number } | null;
