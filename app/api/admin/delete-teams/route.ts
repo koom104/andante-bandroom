@@ -6,10 +6,30 @@ function jsonError(message: string, status: number) {
   return Response.json({ error: message }, { status });
 }
 
+function getServerErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error && "message" in error) {
+    return String((error as { message?: unknown }).message ?? fallback);
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return fallback;
+  }
+}
+
 async function assertNoError<T>(operation: PromiseLike<{ data: T; error: { message?: string } | null }>, message: string) {
   const result = await operation;
   if (result.error) {
-    throw new Error(`${message}: ${result.error.message ?? "unknown error"}`);
+    throw new Error(`${message}: ${getServerErrorMessage(result.error, "unknown error")}`);
   }
 
   return result.data;
@@ -19,6 +39,9 @@ export async function POST(request: Request) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceRoleKey) {
     return jsonError("SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다.", 500);
+  }
+  if (serviceRoleKey.startsWith("sb_publishable_")) {
+    return jsonError("SUPABASE_SERVICE_ROLE_KEY에 publishable key가 들어가 있습니다. Supabase service_role 또는 secret key로 다시 설정해 주세요.", 500);
   }
 
   const body = (await request.json().catch(() => null)) as { teamIds?: unknown; accessToken?: unknown; actorProfileId?: unknown } | null;
@@ -98,6 +121,6 @@ export async function POST(request: Request) {
 
     return Response.json({ ok: true, deletedCount: targetTeams.length });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "팀 삭제에 실패했습니다.", 500);
+    return jsonError(getServerErrorMessage(error, "팀 삭제에 실패했습니다."), 500);
   }
 }
