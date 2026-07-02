@@ -637,18 +637,20 @@ export default function Home() {
   }, [profile?.status, refreshData]);
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
-  const busy = useMemo(() => selectedTeam?.busy ?? emptyBusy, [selectedTeam]);
-  const selectedTeamRehearsals = useMemo(
-    () => Object.fromEntries((selectedTeam?.members ?? []).map((member) => [member.id, rehearsalByUser[member.id] ?? []])),
-    [selectedTeam, rehearsalByUser],
-  );
   const visibleTabs = profile?.role === "admin" ? [...baseTabs, adminTab] : baseTabs;
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
   const currentWeekDates = useMemo(() => weekDates(todayISO()), []);
+  const leaderTeams = useMemo(() => teams.filter((team) => team.leaderId === profile?.id), [teams, profile?.id]);
+  const selectedBookingTeam = leaderTeams.find((team) => team.id === selectedTeamId) ?? leaderTeams[0] ?? null;
+  const bookingBusy = useMemo(() => selectedBookingTeam?.busy ?? emptyBusy, [selectedBookingTeam]);
+  const selectedBookingTeamRehearsals = useMemo(
+    () => Object.fromEntries((selectedBookingTeam?.members ?? []).map((member) => [member.id, rehearsalByUser[member.id] ?? []])),
+    [selectedBookingTeam, rehearsalByUser],
+  );
   const bookingSlots = useMemo(
-    () => (selectedTeam ? buildBookingSlots(selectedTeam, busy, selectedTeamRehearsals, reservations, selectedBookingDate) : []),
-    [selectedTeam, busy, selectedTeamRehearsals, reservations, selectedBookingDate],
+    () => (selectedBookingTeam ? buildBookingSlots(selectedBookingTeam, bookingBusy, selectedBookingTeamRehearsals, reservations, selectedBookingDate) : []),
+    [selectedBookingTeam, bookingBusy, selectedBookingTeamRehearsals, reservations, selectedBookingDate],
   );
   const selectableBookingTimes = useMemo(
     () => bookingSlots.filter((slot) => slot.status === "available" || slot.status === "limited").map((slot) => slot.time),
@@ -656,10 +658,10 @@ export default function Home() {
   );
   const selectedBookingTimes = useMemo(() => {
     const rawSelectedBookingTimes =
-      bookingSelection.teamId === (selectedTeam?.id ?? "") && bookingSelection.date === selectedBookingDate ? bookingSelection.times : [];
+      bookingSelection.teamId === (selectedBookingTeam?.id ?? "") && bookingSelection.date === selectedBookingDate ? bookingSelection.times : [];
     const selectableTimes = new Set(selectableBookingTimes);
     return rawSelectedBookingTimes.filter((time) => selectableTimes.has(time));
-  }, [bookingSelection, selectedTeam?.id, selectedBookingDate, selectableBookingTimes]);
+  }, [bookingSelection, selectedBookingTeam?.id, selectedBookingDate, selectableBookingTimes]);
   const upcomingReservations = reservations
     .filter((reservation) => reservation.status === "confirmed")
     .slice()
@@ -816,7 +818,7 @@ export default function Home() {
   }
 
   function toggleBookingTime(time: string) {
-    const teamId = selectedTeam?.id ?? "";
+    const teamId = selectedBookingTeam?.id ?? "";
 
     setBookingSelection((currentSelection) => {
       const currentTimes =
@@ -835,16 +837,16 @@ export default function Home() {
 
   function clearBookingSelection() {
     setBookingSelection({
-      teamId: selectedTeam?.id ?? "",
+      teamId: selectedBookingTeam?.id ?? "",
       date: selectedBookingDate,
       times: [],
     });
   }
 
   async function reserveSelectedBookingTimes() {
-    if (!selectedTeam) {
+    if (!selectedBookingTeam) {
       setActiveTab("team");
-      setStatus("먼저 팀을 만들어 주세요.");
+      setStatus("팀장인 팀만 예약할 수 있습니다. 팀 탭에서 팀을 만들거나 팀장에게 예약을 요청해 주세요.");
       return;
     }
 
@@ -866,10 +868,10 @@ export default function Home() {
     const bookingGroups = groupBookingTimes(validTimes);
 
     const { error } = await supabase.rpc("create_bookings", {
-      p_team_id: selectedTeam.id,
+      p_team_id: selectedBookingTeam.id,
       p_day: bookingDay,
       p_booking_date: selectedBookingDate,
-      p_purpose: selectedTeam.song,
+      p_purpose: selectedBookingTeam.song,
       p_groups: bookingGroups.map((group) => ({
         start_time: group.start,
         duration: group.duration,
@@ -1037,11 +1039,9 @@ export default function Home() {
 
                 {activeTab === "booking" && (
                   <BookingTab
-                    teams={teams}
                     selectedTeam={selectedTeam}
                     reservations={upcomingReservations}
                     weekDates={currentWeekDates}
-                    changeTeam={changeTeam}
                     openTeamTab={() => setActiveTab("team")}
                     currentUserId={profile.id}
                     onCancelBooking={cancelBooking}
@@ -1050,7 +1050,9 @@ export default function Home() {
 
                 {activeTab === "suggestions" && (
                   <SuggestionsTab
-                    selectedTeam={selectedTeam}
+                    leaderTeams={leaderTeams}
+                    selectedTeam={selectedBookingTeam}
+                    changeTeam={changeTeam}
                     selectedDate={selectedBookingDate}
                     setSelectedDate={setSelectedBookingDate}
                     slots={bookingSlots}
@@ -1336,20 +1338,16 @@ function AppHeader({
 }
 
 function BookingTab({
-  teams,
   selectedTeam,
   reservations,
   weekDates,
-  changeTeam,
   openTeamTab,
   currentUserId,
   onCancelBooking,
 }: {
-  teams: Team[];
   selectedTeam: Team | null;
   reservations: Reservation[];
   weekDates: string[];
-  changeTeam: (teamId: string) => void;
   openTeamTab: () => void;
   currentUserId: string;
   onCancelBooking: (bookingId: string, reason: string) => Promise<void>;
@@ -1373,10 +1371,9 @@ function BookingTab({
     );
   }
 
-  const leader = selectedTeam.members.find((member) => member.id === selectedTeam.leaderId);
   const isLeader = selectedTeam.leaderId === currentUserId;
   const teamReservations = reservations.filter((reservation) => reservation.teamId === selectedTeam.id);
-  const selectedTeamWeekReservations = teamReservations
+  const weekReservations = reservations
     .filter((reservation) => weekDates.some((date) => reservationMatchesDate(reservation, date)))
     .sort((a, b) => {
       const aDate = a.bookingDate ?? weekDates.find((date) => reservationMatchesDate(a, date)) ?? "";
@@ -1390,42 +1387,9 @@ function BookingTab({
 
   return (
     <div className="space-y-3">
-      <MobilePanel>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold text-slate-500">현재 팀</p>
-            <h3 className="mt-1 text-xl font-semibold">{selectedTeam.name}</h3>
-            <p className="mt-1 text-sm text-slate-500">{selectedTeam.song}</p>
-            {leader && (
-              <p className="mt-2 text-xs font-semibold text-[#be3d33]">
-                팀장 {leader.name} · {leader.role}
-              </p>
-            )}
-          </div>
-          <div className="rounded-lg bg-[#fff0eb] px-3 py-2 text-right">
-            <p className="text-xs text-slate-500">멤버</p>
-            <p className="text-lg font-semibold">{selectedTeam.members.length}명</p>
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-          {teams.map((team) => (
-            <button
-              key={team.id}
-              type="button"
-              onClick={() => changeTeam(team.id)}
-              className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs font-semibold ${
-                selectedTeam.id === team.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
-              }`}
-            >
-              {team.name}
-            </button>
-          ))}
-        </div>
-      </MobilePanel>
-
       <MobilePanel title="이번 주 합주 일정">
         <div className="space-y-2">
-          {selectedTeamWeekReservations.slice(0, 5).map((reservation) => {
+          {weekReservations.slice(0, 5).map((reservation) => {
             const date = reservation.bookingDate ?? weekDates.find((item) => reservationMatchesDate(reservation, item));
 
             return (
@@ -1433,7 +1397,9 @@ function BookingTab({
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold">{date ? formatDateLabel(date) : `${reservation.day}요일`}</p>
-                    <p className="mt-1 text-xs text-slate-500">{reservation.purpose || selectedTeam.song}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {reservation.teamName} - {reservation.purpose || reservation.teamSong || "합주"}
+                    </p>
                   </div>
                   <p className="rounded-lg bg-slate-950 px-3 py-2 text-right text-xs font-semibold text-white">
                     {reservation.start}
@@ -1444,7 +1410,7 @@ function BookingTab({
               </div>
             );
           })}
-          {selectedTeamWeekReservations.length === 0 && <EmptyText text="이번 주에 잡힌 합주가 없습니다." />}
+          {weekReservations.length === 0 && <EmptyText text="이번 주에 잡힌 합주가 없습니다." />}
         </div>
       </MobilePanel>
 
@@ -1496,7 +1462,9 @@ function BookingTab({
 }
 
 function SuggestionsTab({
+  leaderTeams,
   selectedTeam,
+  changeTeam,
   selectedDate,
   setSelectedDate,
   slots,
@@ -1504,7 +1472,9 @@ function SuggestionsTab({
   onToggleSlot,
   onReserveSelected,
 }: {
+  leaderTeams: Team[];
   selectedTeam: Team | null;
+  changeTeam: (teamId: string) => void;
   selectedDate: string;
   setSelectedDate: (date: string) => void;
   slots: BookingSlot[];
@@ -1512,10 +1482,6 @@ function SuggestionsTab({
   onToggleSlot: (time: string) => void;
   onReserveSelected: () => Promise<void>;
 }) {
-  if (!selectedTeam) {
-    return <EmptyState title="예약할 팀이 없습니다" body="팀 탭에서 먼저 팀을 만들어 주세요." />;
-  }
-
   const quickDates = Array.from({ length: 21 }, (_, index) => addDays(todayISO(), index));
   const availableCount = slots.filter((slot) => slot.status === "available").length;
   const limitedCount = slots.filter((slot) => slot.status === "limited").length;
@@ -1525,6 +1491,32 @@ function SuggestionsTab({
 
   return (
     <div className="space-y-3">
+      <MobilePanel title="예약 팀 선택">
+        {leaderTeams.length > 0 ? (
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {leaderTeams.map((team) => (
+              <button
+                key={team.id}
+                type="button"
+                onClick={() => changeTeam(team.id)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs font-semibold ${
+                  selectedTeam?.id === team.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
+                }`}
+              >
+                <span className="block">{team.name}</span>
+                <span className="mt-1 block opacity-75">{team.song || "합주 목표 없음"}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <EmptyText text="팀장인 팀만 예약할 수 있습니다. 팀 탭에서 팀을 만들거나 팀장에게 예약을 요청해 주세요." />
+        )}
+      </MobilePanel>
+
+      {!selectedTeam && <EmptyState title="예약할 수 있는 팀이 없습니다" body="팀장인 팀이 있을 때만 합주실 예약을 만들 수 있습니다." />}
+
+      {selectedTeam && (
+        <>
       <MobilePanel>
         <p className="text-xs font-semibold text-[#ef6351]">합주 예약</p>
         <h3 className="mt-1 text-2xl font-semibold">{formatDateLabel(selectedDate)}</h3>
@@ -1536,12 +1528,9 @@ function SuggestionsTab({
       <MobilePanel title="날짜 선택">
         <label className="block">
           <span className="text-xs font-semibold text-slate-500">예약 날짜</span>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(event) => setSelectedDate(event.target.value || todayISO())}
-            className="mt-2 h-11 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm font-semibold outline-none transition focus:border-[#ff665a]"
-          />
+          <div className="mt-2 flex h-11 w-full items-center rounded-lg border border-[#f0ded7] bg-white px-3 text-sm font-semibold">
+            {selectedDate}
+          </div>
         </label>
         <p className="mt-3 text-xs font-semibold text-slate-500">오늘부터 3주</p>
         <div className="mt-2 grid grid-cols-7 gap-1">
@@ -1628,6 +1617,8 @@ function SuggestionsTab({
           );
         })}
       </div>
+        </>
+      )}
     </div>
   );
 }

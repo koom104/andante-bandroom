@@ -326,8 +326,8 @@ begin
     raise exception '승인된 사용자만 예약할 수 있습니다.';
   end if;
 
-  if not (public.is_admin(auth.uid()) or public.is_team_member(p_team_id, auth.uid())) then
-    raise exception '팀 멤버만 해당 팀 예약을 만들 수 있습니다.';
+  if not (public.is_admin(auth.uid()) or public.is_team_leader(p_team_id, auth.uid())) then
+    raise exception '팀장만 해당 팀 예약을 만들 수 있습니다.';
   end if;
 
   if p_day not in ('월', '화', '수', '목', '금', '토', '일') then
