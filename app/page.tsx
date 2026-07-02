@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토";
-type Tab = "booking" | "suggestions" | "schedule" | "team" | "news";
+type Tab = "booking" | "suggestions" | "my" | "team" | "news";
 type Session = "보컬" | "리드기타" | "세컨기타" | "어쿠스틱" | "드럼" | "피아노" | "신디";
 
 type Member = {
@@ -196,7 +196,7 @@ const news = [
 const tabs: Array<{ id: Tab; label: string; short: string }> = [
   { id: "booking", label: "예약", short: "R" },
   { id: "suggestions", label: "추천", short: "A" },
-  { id: "schedule", label: "시간표", short: "T" },
+  { id: "my", label: "마이", short: "M" },
   { id: "team", label: "팀", short: "+" },
   { id: "news", label: "소식", short: "N" },
 ];
@@ -488,11 +488,13 @@ export default function Home() {
                   />
                 )}
 
-                {activeTab === "schedule" && (
-                  <ScheduleInputTab
+                {activeTab === "my" && (
+                  <MyPageTab
+                    teams={teams}
                     selectedTeam={selectedTeam}
                     selectedMember={selectedMember}
                     selectedMemberId={selectedMemberId}
+                    changeTeam={changeTeam}
                     setSelectedMemberId={setSelectedMemberId}
                     busy={busy}
                     toggleBusy={toggleBusy}
@@ -756,32 +758,73 @@ function SuggestionsTab({
   );
 }
 
-function ScheduleInputTab({
+function MyPageTab({
+  teams,
   selectedTeam,
   selectedMember,
   selectedMemberId,
+  changeTeam,
   setSelectedMemberId,
   busy,
   toggleBusy,
 }: {
+  teams: Team[];
   selectedTeam: Team;
   selectedMember: Member;
   selectedMemberId: string;
+  changeTeam: (teamId: string) => void;
   setSelectedMemberId: (memberId: string) => void;
   busy: Record<string, string[]>;
   toggleBusy: (day: Day, time: string) => void;
 }) {
   const leaderId = selectedTeam.leaderId;
+  const busyCount = busy[selectedMember.id]?.length ?? 0;
+  const isLeader = selectedMember.id === leaderId;
 
   return (
     <div className="space-y-3">
       <MobilePanel>
-        <p className="text-xs font-semibold text-[#ef6351]">팀원 시간표</p>
-        <h3 className="mt-1 text-xl font-semibold">{selectedTeam.name}</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
-          팀원을 고른 뒤 불가능한 시간을 누르면 AI 추천이 바로 바뀝니다.
+        <p className="text-xs font-semibold text-[#ef6351]">마이페이지</p>
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-2xl font-semibold">{selectedMember.name}</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {selectedTeam.name} · {selectedMember.role}
+            </p>
+          </div>
+          <span className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs font-semibold text-[#be3d33]">
+            {isLeader ? "팀장" : "멤버"}
+          </span>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <ProfileStat label="소속 팀" value={selectedTeam.name} />
+          <ProfileStat label="내 세션" value={selectedMember.role} />
+          <ProfileStat label="불가 시간" value={`${busyCount}개`} />
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="내 팀 선택">
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {teams.map((team) => (
+            <button
+              key={team.id}
+              type="button"
+              onClick={() => changeTeam(team.id)}
+              className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs font-semibold ${
+                selectedTeam.id === team.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
+              }`}
+            >
+              {team.name}
+            </button>
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel title="내 프로필 선택">
+        <p className="mb-3 text-xs leading-5 text-slate-500">
+          공모전 프로토타입에서는 로그인 대신 팀원 중 내 프로필을 선택해 시간표를 수정합니다.
         </p>
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+        <div className="flex gap-2 overflow-x-auto pb-1">
           {selectedTeam.members.map((member) => (
             <button
               key={member.id}
@@ -801,7 +844,10 @@ function ScheduleInputTab({
         </div>
       </MobilePanel>
 
-      <MobilePanel title={`${selectedMember.name} 시간표`}>
+      <MobilePanel title="내 시간표 편집">
+        <p className="mb-3 text-xs leading-5 text-slate-500">
+          불가능한 시간을 누르면 AI 추천 시간이 바로 다시 계산됩니다.
+        </p>
         <div className="grid grid-cols-[44px_repeat(6,minmax(38px,1fr))] gap-1">
           <div />
           {days.map((day) => (
@@ -1093,6 +1139,15 @@ function MobilePanel({ title, children }: { title?: string; children: React.Reac
       {title && <h3 className="mb-3 text-sm font-semibold text-slate-900">{title}</h3>}
       {children}
     </section>
+  );
+}
+
+function ProfileStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-h-16 rounded-lg border border-[#f0ded7] bg-white p-2">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold leading-5 text-slate-950">{value}</p>
+    </div>
   );
 }
 
