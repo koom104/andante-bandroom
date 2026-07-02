@@ -690,7 +690,7 @@ export default function Home() {
     [selectedBookingTeam, bookingBusy, selectedBookingTeamRehearsals, reservations, selectedBookingDate],
   );
   const selectableBookingTimes = useMemo(
-    () => bookingSlots.filter((slot) => slot.status === "available" || slot.status === "limited").map((slot) => slot.time),
+    () => bookingSlots.filter((slot) => slot.status !== "reserved").map((slot) => slot.time),
     [bookingSlots],
   );
   const selectedBookingTimes = useMemo(() => {
@@ -1714,7 +1714,7 @@ function BookingSlotRow({
   isSelected: boolean;
   onToggle: (time: string) => void;
 }) {
-  const disabled = slot.status === "reserved" || slot.status === "unavailable";
+  const disabled = slot.status === "reserved";
   const statusLabel =
     slot.status === "reserved" ? "예약 완료" : slot.status === "available" ? "전원 가능" : slot.status === "limited" ? "일부 가능" : "불가";
   const badgeClass =
@@ -1764,7 +1764,7 @@ function BookingSlotRow({
               : "bg-[#ff665a] text-white"
         }`}
       >
-        {slot.status === "reserved" ? "이미 예약됨" : slot.status === "unavailable" ? "예약 불가" : isSelected ? "선택 해제" : "선택"}
+        {slot.status === "reserved" ? "이미 예약됨" : isSelected ? "선택 해제" : "선택"}
       </button>
     </div>
   );
