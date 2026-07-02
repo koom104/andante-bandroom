@@ -1727,25 +1727,20 @@ function TeamTab({
 }) {
   const [teamName, setTeamName] = useState("");
   const [song, setSong] = useState("");
-  const [leaderId, setLeaderId] = useState(currentUserId);
   const [leaderRole, setLeaderRole] = useState<SessionRole>("보컬");
   const [memberId, setMemberId] = useState(currentUserId);
   const [memberRole, setMemberRole] = useState<SessionRole>("리드기타");
   const [members, setMembers] = useState<TeamMemberDraft[]>([]);
   const [message, setMessage] = useState("승인된 부원을 선택해 새 팀을 만들 수 있어요.");
 
-  const effectiveLeaderId = approvedProfiles.some((item) => item.id === leaderId) ? leaderId : approvedProfiles[0]?.id ?? "";
-  const effectiveMemberId = approvedProfiles.some((item) => item.id === memberId) ? memberId : approvedProfiles[0]?.id ?? "";
-  const leader = approvedProfiles.find((item) => item.id === effectiveLeaderId);
+  const leader = approvedProfiles.find((item) => item.id === currentUserId);
+  const availableMemberProfiles = approvedProfiles.filter((item) => item.id !== currentUserId);
+  const effectiveMemberId = availableMemberProfiles.some((item) => item.id === memberId) ? memberId : availableMemberProfiles[0]?.id ?? "";
 
   function addMemberDraft() {
     const target = approvedProfiles.find((item) => item.id === effectiveMemberId);
     if (!target) {
       setMessage("추가할 부원을 선택해 주세요.");
-      return;
-    }
-    if (target.id === effectiveLeaderId) {
-      setMessage("팀장은 자동으로 멤버에 포함됩니다.");
       return;
     }
     if (members.some((member) => member.userId === target.id)) {
@@ -1768,7 +1763,7 @@ function TeamTab({
       return;
     }
     if (!leader) {
-      setMessage("팀장을 선택해 주세요.");
+      setMessage("내 계정 정보를 불러온 뒤 다시 시도해 주세요.");
       return;
     }
     if (teams.some((team) => team.name.toLowerCase() === trimmedTeamName.toLowerCase())) {
@@ -1779,7 +1774,7 @@ function TeamTab({
     await onAddTeam({
       teamName: trimmedTeamName,
       song,
-      leaderId: effectiveLeaderId,
+      leaderId: currentUserId,
       leaderRole,
       members,
     });
@@ -1795,7 +1790,7 @@ function TeamTab({
         <p className="text-xs font-semibold text-[#ef6351]">팀 추가</p>
         <h3 className="mt-1 text-xl font-semibold">새 합주 팀 만들기</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          승인된 부원 중 팀장과 멤버를 선택하고, 각 멤버의 세션을 지정합니다.
+          팀장은 내 계정으로 고정하고, 멤버를 선택해 각 세션을 지정합니다.
         </p>
         <p className="mt-3 rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">{message}</p>
       </MobilePanel>
@@ -1809,19 +1804,25 @@ function TeamTab({
 
       <MobilePanel title="팀장 지정">
         <div className="space-y-3">
-          <ProfileSelect label="팀장" value={effectiveLeaderId} onChange={setLeaderId} profiles={approvedProfiles} />
+          <div>
+            <p className="text-xs font-semibold text-slate-500">팀장</p>
+            <div className="mt-2 rounded-lg border border-[#f0ded7] bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-950">
+              {leader ? `${leader.name} · ${leader.cohort}` : "내 계정"}
+            </div>
+          </div>
           <SessionSelect label="팀장 세션" value={leaderRole} onChange={setLeaderRole} />
         </div>
       </MobilePanel>
 
       <MobilePanel title="멤버 추가">
         <div className="space-y-3">
-          <ProfileSelect label="멤버" value={effectiveMemberId} onChange={setMemberId} profiles={approvedProfiles} />
+          <ProfileSelect label="멤버" value={effectiveMemberId} onChange={setMemberId} profiles={availableMemberProfiles} />
           <SessionSelect label="멤버 세션" value={memberRole} onChange={setMemberRole} />
           <button
             type="button"
             onClick={addMemberDraft}
-            className="h-10 w-full rounded-lg border border-slate-950 bg-slate-950 text-sm font-semibold text-white"
+            disabled={availableMemberProfiles.length === 0}
+            className="h-10 w-full rounded-lg border border-slate-950 bg-slate-950 text-sm font-semibold text-white disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
           >
             멤버 추가
           </button>
@@ -2073,6 +2074,11 @@ function ProfileSelect({
         onChange={(event) => onChange(event.target.value)}
         className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
       >
+        {profiles.length === 0 && (
+          <option value="" disabled>
+            선택 가능한 부원이 없습니다
+          </option>
+        )}
         {profiles.map((profile) => (
           <option key={profile.id} value={profile.id}>
             {profile.name} · {profile.cohort}
