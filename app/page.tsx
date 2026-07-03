@@ -1283,9 +1283,9 @@ function AuthScreen({
     <div className="space-y-3">
       <MobilePanel>
         <p className="text-xs font-semibold text-[#ef6351]">Andante</p>
-        <h1 className="mt-2 text-2xl font-semibold">동아리방 예약 로그인</h1>
+        <h1 className="mt-2 text-2xl font-semibold">로그인</h1>
         <p className="mt-3 text-sm leading-6 text-slate-600">
-          부원은 가입 신청 후 관리자 승인을 받아야 예약과 시간표 기능을 사용할 수 있습니다.
+          회원가입 후 관리자의 승인이 있어야 사용 가능합니다.
         </p>
       </MobilePanel>
 
