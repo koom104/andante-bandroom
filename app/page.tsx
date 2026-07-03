@@ -86,6 +86,12 @@ type NewTeamPayload = {
   members: TeamMemberDraft[];
 };
 
+type RehearsalStats = {
+  totalDuration: number;
+  rank: number | null;
+  rankedCount: number;
+};
+
 const days: Day[] = ["월", "화", "수", "목", "금", "토", "일"];
 const dateDayNames: Day[] = ["일", "월", "화", "수", "목", "금", "토"];
 const sessionOptions: SessionRole[] = ["보컬", "리드기타", "세컨기타", "어쿠스틱", "드럼", "피아노", "신디"];
@@ -216,6 +222,38 @@ function reservationDisplayDate(reservation: Reservation, anchorDate = todayISO(
 
 function isFutureReservation(reservation: Reservation, anchorDate = todayISO()) {
   return reservation.status === "confirmed" && reservationDisplayDate(reservation, anchorDate) >= anchorDate;
+}
+
+function memberRehearsalStats(userId: string, profiles: Profile[], teams: Team[], reservations: Reservation[], anchorDate = todayISO()): RehearsalStats {
+  const rankedProfiles = profiles.filter((profile) => profile.role !== "admin");
+  const rankedIds = new Set(rankedProfiles.map((profile) => profile.id));
+  const totals = new Map(rankedProfiles.map((profile) => [profile.id, 0]));
+  const teamById = new Map(teams.map((team) => [team.id, team]));
+
+  for (const reservation of reservations) {
+    if (reservation.status !== "confirmed" || !reservation.bookingDate || reservation.bookingDate >= anchorDate) {
+      continue;
+    }
+
+    const team = teamById.get(reservation.teamId);
+    if (!team) {
+      continue;
+    }
+
+    for (const member of team.members) {
+      if (!rankedIds.has(member.id)) {
+        continue;
+      }
+
+      totals.set(member.id, (totals.get(member.id) ?? 0) + reservation.duration);
+    }
+  }
+
+  const totalDuration = totals.get(userId) ?? 0;
+  const rankedCount = totals.size;
+  const rank = totals.has(userId) ? 1 + [...totals.values()].filter((total) => total > totalDuration).length : null;
+
+  return { totalDuration, rank, rankedCount };
 }
 
 function formatDateShort(date: string) {
@@ -430,6 +468,7 @@ export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [allTeams, setAllTeams] = useState<Team[]>([]);
   const [busyByUser, setBusyByUser] = useState<Record<string, string[]>>({});
   const [rehearsalByUser, setRehearsalByUser] = useState<Record<string, string[]>>({});
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -636,6 +675,7 @@ export default function Home() {
     setProfiles(nextProfiles);
     setBusyByUser(scheduleMap);
     setRehearsalByUser(rehearsalMap);
+    setAllTeams(allTeams);
     setTeams(nextTeams);
     setReservations(nextReservations);
     setIsLoadingData(false);
@@ -665,6 +705,7 @@ export default function Home() {
       if (!nextSession) {
         setProfile(null);
         setTeams([]);
+        setAllTeams([]);
         setProfiles([]);
         setBusyByUser({});
         setRehearsalByUser({});
@@ -1187,6 +1228,9 @@ export default function Home() {
                   <MyPageTab
                     profile={profile}
                     teams={teams}
+                    allTeams={allTeams}
+                    approvedProfiles={approvedProfiles}
+                    reservations={reservations}
                     ownBusy={busyByUser[profile.id] ?? []}
                     ownRehearsals={rehearsalByUser[profile.id] ?? []}
                     toggleBusy={(day, time) => toggleSchedule(profile.id, day, time)}
@@ -1799,12 +1843,18 @@ function BookingSlotRow({
 function MyPageTab({
   profile,
   teams,
+  allTeams,
+  approvedProfiles,
+  reservations,
   ownBusy,
   ownRehearsals,
   toggleBusy,
 }: {
   profile: Profile;
   teams: Team[];
+  allTeams: Team[];
+  approvedProfiles: Profile[];
+  reservations: Reservation[];
   ownBusy: string[];
   ownRehearsals: string[];
   toggleBusy: (day: Day, time: string) => void;
@@ -1815,6 +1865,11 @@ function MyPageTab({
       return member ? { team, role: member.role } : null;
     })
     .filter((item): item is { team: Team; role: SessionRole } => Boolean(item));
+  const rehearsalStats = useMemo(
+    () => memberRehearsalStats(profile.id, approvedProfiles, allTeams, reservations),
+    [profile.id, approvedProfiles, allTeams, reservations],
+  );
+  const rehearsalRank = rehearsalStats.rank ? `${rehearsalStats.rank}위 / ${rehearsalStats.rankedCount}명` : "-";
 
   return (
     <div className="space-y-3">
@@ -1830,6 +1885,10 @@ function MyPageTab({
           <span className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs font-semibold text-[#be3d33]">
             {profile.role === "admin" ? "관리자" : "부원"}
           </span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <ProfileStat label="누적 합주시간" value={formatDuration(rehearsalStats.totalDuration)} />
+          <ProfileStat label="합주 시간 순위" value={rehearsalRank} />
         </div>
       </MobilePanel>
 
