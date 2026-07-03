@@ -1982,7 +1982,7 @@ function TeamTab({
 
         <div className="mt-4 space-y-2">
           {members.length === 0 ? (
-            <EmptyText text="추가 멤버가 없으면 팀장 1명만 있는 팀으로도 만들 수 있어요." />
+            <EmptyText text="보컬&악기로 같이 하는 세션의 경우 보컬로 선택해주세요." />
           ) : (
             members.map((member) => (
               <div key={member.userId} className="flex items-center justify-between rounded-lg border border-[#f0ded7] bg-white p-3">
