@@ -398,7 +398,33 @@ function isMissingSchemaError(message: string) {
   return message.includes("relation") || message.includes("does not exist") || message.includes("schema");
 }
 
+function useAppViewportHeight() {
+  useEffect(() => {
+    const syncViewportHeight = () => {
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
+    };
+
+    syncViewportHeight();
+
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", syncViewportHeight);
+    viewport?.addEventListener("scroll", syncViewportHeight);
+    window.addEventListener("resize", syncViewportHeight);
+    window.addEventListener("orientationchange", syncViewportHeight);
+
+    return () => {
+      viewport?.removeEventListener("resize", syncViewportHeight);
+      viewport?.removeEventListener("scroll", syncViewportHeight);
+      window.removeEventListener("resize", syncViewportHeight);
+      window.removeEventListener("orientationchange", syncViewportHeight);
+    };
+  }, []);
+}
+
 export default function Home() {
+  useAppViewportHeight();
+
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [authAccessToken, setAuthAccessToken] = useState("");
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -1120,12 +1146,12 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
+    <main className="app-viewport bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
         <section className="relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
               <AppHeader selectedTeam={selectedTeam} status={status} profile={profile} onSignOut={signOut} />
 
-              <div className="flex-1 overflow-y-auto px-4 pb-32 pt-3">
+              <div className="app-scroll flex-1 overflow-y-auto px-4 pt-3">
                 {isLoadingData && (
                   <p className="mb-3 rounded-lg border border-[#f0ded7] bg-white px-3 py-2 text-xs text-slate-500">
                     데이터를 새로 불러오는 중입니다.
@@ -1188,7 +1214,7 @@ export default function Home() {
                 )}
               </div>
 
-              <div className="absolute inset-x-0 bottom-0 border-t border-[#f0ded7] bg-[#fff8f4]/95 px-4 pb-3 pt-3 backdrop-blur">
+              <div className="app-tabbar absolute inset-x-0 bottom-0 border-t border-[#f0ded7] bg-[#fff8f4]/95 px-4 pt-3 backdrop-blur">
                 <nav className="grid gap-1" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }} aria-label="앱 탭">
                   {visibleTabs.map((tab) => (
                     <button
@@ -1213,10 +1239,10 @@ export default function Home() {
 
 function PhoneShell({ children }: { children: ReactNode }) {
   return (
-    <main className="h-screen overflow-hidden bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
+    <main className="app-viewport bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
         <section className="relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
-          <div className="flex-1 overflow-y-auto px-4 py-4">{children}</div>
+          <div className="app-shell-scroll flex-1 overflow-y-auto px-4 pt-4">{children}</div>
         </section>
       </div>
     </main>

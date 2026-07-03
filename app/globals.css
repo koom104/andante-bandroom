@@ -16,6 +16,9 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-height: 100%;
+  overscroll-behavior-y: none;
 }
 
 button {
@@ -25,4 +28,31 @@ button {
 button:focus-visible {
   outline: 2px solid #dc2626;
   outline-offset: 2px;
+}
+
+html {
+  min-height: 100%;
+}
+
+.app-viewport {
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-height, 100dvh);
+  overflow: hidden;
+}
+
+.app-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));
+}
+
+.app-shell-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+
+.app-tabbar {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
 }
