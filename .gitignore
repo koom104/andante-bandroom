@@ -21,7 +21,10 @@
 .DS_Store
 *.pem
 /work/
+/output/
 /outputs/
+/tmp/
+tsconfig.tsbuildinfo
 
 # debug
 npm-debug.log*

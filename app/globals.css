@@ -45,14 +45,43 @@ html {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: calc(10rem + env(safe-area-inset-bottom, 0px));
+  scroll-padding-top: 5rem;
+}
+
+.app-scroll-keyboard {
+  padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));
 }
 
 .app-shell-scroll {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: 10rem;
+  scroll-padding-top: 2rem;
 }
 
 .app-tabbar {
   padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+
+.app-scroll input,
+.app-scroll textarea,
+.app-scroll select,
+.app-shell-scroll input,
+.app-shell-scroll textarea,
+.app-shell-scroll select {
+  scroll-margin-top: 0;
+  scroll-margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .app-scroll input,
+  .app-scroll textarea,
+  .app-scroll select,
+  .app-shell-scroll input,
+  .app-shell-scroll textarea,
+  .app-shell-scroll select {
+    font-size: 16px !important;
+  }
 }
