@@ -1904,6 +1904,8 @@ export default function Home() {
                     goalCategories={goalCategories}
                     reservations={upcomingReservations.filter((reservation) => !isReservationPast(reservation))}
                     busyByUser={busyByUser}
+                    dateBusyByUser={dateBusyByUser}
+                    dateOverrideByUser={dateOverrideByUser}
                     rehearsalByUser={rehearsalByUser}
                     approveProfile={approveProfile}
                     addGoalCategory={addGoalCategory}
@@ -1912,6 +1914,8 @@ export default function Home() {
                     updateTeam={updateTeam}
                     cancelBooking={cancelBooking}
                     saveWeeklySchedule={(userId, nextBusyKeys) => saveWeeklyScheduleDraft(userId, nextBusyKeys)}
+                    saveDateSchedule={(userId, date, nextBusyKeys) => saveDateScheduleDraft(userId, date, nextBusyKeys)}
+                    resetDateSchedule={(userId, date) => resetDateSchedule(userId, date)}
                   />
                 )}
               </div>
@@ -3166,6 +3170,7 @@ function TeamEditPanel({
   const eligibleProfiles = approvedProfiles.filter((profile) => profile.role !== "admin");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
+  const [teamSearch, setTeamSearch] = useState("");
   const [teamName, setTeamName] = useState("");
   const [selectedGoal, setSelectedGoal] = useState("");
   const [leaderId, setLeaderId] = useState("");
@@ -3200,6 +3205,7 @@ function TeamEditPanel({
     );
     setMemberId("");
     setMemberSearch("");
+    setTeamSearch(selectedTeam.name);
     setMessage("");
   }, [selectedTeam?.id, fixedLeaderId, goalCategories]);
 
@@ -3257,20 +3263,14 @@ function TeamEditPanel({
         <EmptyText text={emptyText} />
       ) : (
         <div className="space-y-3">
-          <label className="block">
-            <span className="text-xs font-semibold text-slate-500">수정할 팀</span>
-            <select
-              value={selectedTeam?.id ?? ""}
-              onChange={(event) => setSelectedTeamId(event.target.value)}
-              className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
-            >
-              {teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name} · {team.song}
-                </option>
-              ))}
-            </select>
-          </label>
+          <TeamSearchPicker
+            label="수정할 팀 검색"
+            value={selectedTeam?.id ?? ""}
+            query={teamSearch}
+            onQueryChange={setTeamSearch}
+            onChange={setSelectedTeamId}
+            teams={teams}
+          />
           <LabeledInput label="팀 이름" value={teamName} onChange={setTeamName} placeholder="곡 이름" />
           <GoalCategorySelect label="합주 목표" value={selectedGoal} onChange={setSelectedGoal} categories={goalCategories} />
 
@@ -3422,6 +3422,8 @@ function AdminTab({
   goalCategories,
   reservations,
   busyByUser,
+  dateBusyByUser,
+  dateOverrideByUser,
   rehearsalByUser,
   approveProfile,
   addGoalCategory,
@@ -3430,6 +3432,8 @@ function AdminTab({
   updateTeam,
   cancelBooking,
   saveWeeklySchedule,
+  saveDateSchedule,
+  resetDateSchedule,
 }: {
   pendingProfiles: Profile[];
   approvedProfiles: Profile[];
@@ -3437,6 +3441,8 @@ function AdminTab({
   goalCategories: GoalCategory[];
   reservations: Reservation[];
   busyByUser: Record<string, string[]>;
+  dateBusyByUser: Record<string, Record<string, string[]>>;
+  dateOverrideByUser: Record<string, string[]>;
   rehearsalByUser: Record<string, string[]>;
   approveProfile: (profileId: string, nextStatus: "approved" | "rejected") => Promise<void>;
   addGoalCategory: (name: string) => Promise<void>;
@@ -3445,12 +3451,10 @@ function AdminTab({
   updateTeam: (payload: UpdateTeamPayload) => Promise<void>;
   cancelBooking: (bookingId: string, reason: string) => Promise<void>;
   saveWeeklySchedule: (userId: string, nextBusyKeys: string[]) => Promise<void>;
+  saveDateSchedule: (userId: string, date: string, nextBusyKeys: string[]) => Promise<void>;
+  resetDateSchedule: (userId: string, date: string) => Promise<void>;
 }) {
-  const [selectedUserId, setSelectedUserId] = useState("");
   const [newGoalName, setNewGoalName] = useState("");
-
-  const effectiveSelectedUserId = approvedProfiles.some((item) => item.id === selectedUserId) ? selectedUserId : approvedProfiles[0]?.id ?? "";
-  const selectedProfile = approvedProfiles.find((item) => item.id === effectiveSelectedUserId);
 
   async function submitGoalCategory() {
     const trimmedGoalName = newGoalName.trim();
@@ -3558,27 +3562,129 @@ function AdminTab({
       </MobilePanel>
 
       <MobilePanel title="부원 시간표 수정">
-        <div className="space-y-3">
-          <ProfileSelect label="부원" value={effectiveSelectedUserId} onChange={setSelectedUserId} profiles={approvedProfiles} />
-          {selectedProfile ? (
-            <>
-              <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">
-                {selectedProfile.name} 부원의 불가 시간을 관리자 권한으로 수정합니다. 합주 시간은 예약 취소로만 풀립니다.
-              </p>
-              <ScheduleGrid
-                busy={busyByUser[selectedProfile.id] ?? []}
-                rehearsals={rehearsalByUser[selectedProfile.id] ?? []}
-                onSaveDraft={(nextBusyKeys) => saveWeeklySchedule(selectedProfile.id, nextBusyKeys)}
-              />
-            </>
-          ) : (
-            <EmptyText text="승인된 부원이 없습니다." />
-          )}
-        </div>
+        <AdminScheduleEditor
+          profiles={approvedProfiles}
+          busyByUser={busyByUser}
+          dateBusyByUser={dateBusyByUser}
+          dateOverrideByUser={dateOverrideByUser}
+          rehearsalByUser={rehearsalByUser}
+          saveWeeklySchedule={saveWeeklySchedule}
+          saveDateSchedule={saveDateSchedule}
+          resetDateSchedule={resetDateSchedule}
+        />
       </MobilePanel>
 
       <AdminTeamManager allTeams={allTeams} approvedProfiles={approvedProfiles} goalCategories={goalCategories} onAddTeam={addTeam} onUpdateTeam={updateTeam} />
 
+    </div>
+  );
+}
+
+function AdminScheduleEditor({
+  profiles,
+  busyByUser,
+  dateBusyByUser,
+  dateOverrideByUser,
+  rehearsalByUser,
+  saveWeeklySchedule,
+  saveDateSchedule,
+  resetDateSchedule,
+}: {
+  profiles: Profile[];
+  busyByUser: Record<string, string[]>;
+  dateBusyByUser: Record<string, Record<string, string[]>>;
+  dateOverrideByUser: Record<string, string[]>;
+  rehearsalByUser: Record<string, string[]>;
+  saveWeeklySchedule: (userId: string, nextBusyKeys: string[]) => Promise<void>;
+  saveDateSchedule: (userId: string, date: string, nextBusyKeys: string[]) => Promise<void>;
+  resetDateSchedule: (userId: string, date: string) => Promise<void>;
+}) {
+  const memberProfiles = profiles.filter((profile) => profile.role !== "admin");
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [memberQuery, setMemberQuery] = useState("");
+  const [scheduleScope, setScheduleScope] = useState<ScheduleScope>("weekly");
+  const [scheduleDate, setScheduleDate] = useState(todayISO);
+
+  const effectiveSelectedUserId = memberProfiles.some((profile) => profile.id === selectedUserId)
+    ? selectedUserId
+    : memberProfiles[0]?.id ?? "";
+  const selectedProfile = memberProfiles.find((profile) => profile.id === effectiveSelectedUserId) ?? null;
+  const ownBusy = selectedProfile ? busyByUser[selectedProfile.id] ?? [] : [];
+  const dateBusyByDate = selectedProfile ? dateBusyByUser[selectedProfile.id] ?? {} : {};
+  const dateOverrideDates = selectedProfile ? dateOverrideByUser[selectedProfile.id] ?? [] : [];
+  const dateHasOverride = dateOverrideDates.includes(scheduleDate);
+  const scheduleDateDay = dateToDay(scheduleDate);
+  const weeklyBusyForDate = ownBusy
+    .filter((key) => key.startsWith(`${scheduleDateDay}-`))
+    .map((key) => dateSlotKey(scheduleDate, weeklyKeyToTime(key)));
+  const selectedDateBusy = dateHasOverride
+    ? (dateBusyByDate[scheduleDate] ?? []).map((time) => dateSlotKey(scheduleDate, time))
+    : weeklyBusyForDate;
+  const scheduleColumns: ScheduleColumn[] =
+    scheduleScope === "date"
+      ? [{ label: formatDateShort(scheduleDate), day: scheduleDateDay, date: scheduleDate }]
+      : dateDayNames.map((day) => ({ label: day, day }));
+
+  return (
+    <div className="space-y-3">
+      <ProfileSearchPicker
+        label="부원 검색"
+        value={effectiveSelectedUserId}
+        query={memberQuery}
+        onQueryChange={setMemberQuery}
+        onChange={setSelectedUserId}
+        profiles={memberProfiles}
+      />
+
+      {selectedProfile ? (
+        <>
+          <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">
+            {selectedProfile.name} 부원의 고정 요일 시간표와 날짜별 시간표를 관리자 권한으로 수정합니다.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { id: "weekly", label: "고정 요일" },
+              { id: "date", label: "날짜별 수정" },
+            ] as Array<{ id: ScheduleScope; label: string }>).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setScheduleScope(item.id)}
+                className={`h-10 rounded-lg border text-xs font-semibold ${
+                  scheduleScope === item.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white text-slate-600"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {scheduleScope === "date" && (
+            <div className="space-y-2">
+              <ThreeWeekCalendar selectedDate={scheduleDate} onSelectDate={setScheduleDate} />
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                {dateHasOverride ? "이 날짜는 날짜별 시간표가 적용 중입니다." : "아직 날짜별 수정이 없어 고정 시간표를 사용합니다."}
+              </p>
+            </div>
+          )}
+          <ScheduleGrid
+            busy={scheduleScope === "date" ? selectedDateBusy : ownBusy}
+            columns={scheduleColumns}
+            rehearsals={scheduleScope === "date" ? rehearsalByUser[selectedProfile.id] ?? [] : []}
+            onSaveDraft={(nextBusyKeys) =>
+              scheduleScope === "date"
+                ? saveDateSchedule(selectedProfile.id, scheduleDate, nextBusyKeys)
+                : saveWeeklySchedule(selectedProfile.id, nextBusyKeys)
+            }
+            onResetDateOverride={
+              scheduleScope === "date" && dateHasOverride
+                ? () => resetDateSchedule(selectedProfile.id, scheduleDate)
+                : undefined
+            }
+          />
+        </>
+      ) : (
+        <EmptyText text="승인된 부원이 없습니다." />
+      )}
     </div>
   );
 }
@@ -3780,6 +3886,90 @@ function ProfileSearchPicker({
             >
               <span className="font-semibold">{profile.name}</span>
               <span className={isSelected ? "text-white/75" : "text-slate-500"}>{profile.cohort}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TeamSearchPicker({
+  label,
+  value,
+  query,
+  onQueryChange,
+  onChange,
+  teams,
+}: {
+  label: string;
+  value: string;
+  query: string;
+  onQueryChange: (value: string) => void;
+  onChange: (value: string) => void;
+  teams: Team[];
+}) {
+  const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
+  const selectedTeam = teams.find((team) => team.id === value) ?? null;
+  const filteredTeams = teams
+    .filter((team) => {
+      if (!normalizedQuery) {
+        return true;
+      }
+
+      const leader = team.members.find((member) => member.id === team.leaderId);
+      return `${team.name} ${team.song} ${leader?.name ?? ""}`.toLocaleLowerCase("ko-KR").includes(normalizedQuery);
+    })
+    .slice(0, 8);
+
+  return (
+    <div>
+      <label className="block">
+        <span className="text-xs font-semibold text-slate-500">{label}</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => {
+            onQueryChange(event.target.value);
+            onChange("");
+          }}
+          placeholder="팀 이름 또는 합주 목표 검색"
+          className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a]"
+        />
+      </label>
+
+      {selectedTeam && (
+        <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
+          선택됨: {selectedTeam.name} · {selectedTeam.song}
+        </p>
+      )}
+
+      <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-[#f0ded7] bg-white">
+        {teams.length === 0 && <p className="px-3 py-3 text-xs text-slate-500">수정할 팀이 없습니다.</p>}
+        {teams.length > 0 && filteredTeams.length === 0 && <p className="px-3 py-3 text-xs text-slate-500">검색 결과가 없습니다.</p>}
+        {filteredTeams.map((team) => {
+          const isSelected = team.id === value;
+          const leader = team.members.find((member) => member.id === team.leaderId);
+
+          return (
+            <button
+              key={team.id}
+              type="button"
+              onClick={() => {
+                onChange(team.id);
+                onQueryChange(team.name);
+              }}
+              className={`flex w-full items-center justify-between gap-3 border-b border-[#f7e8e2] px-3 py-2 text-left text-sm last:border-b-0 ${
+                isSelected ? "bg-slate-950 text-white" : "bg-white text-slate-950"
+              }`}
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-semibold">{team.name}</span>
+                <span className={`mt-0.5 block truncate text-xs ${isSelected ? "text-white/75" : "text-slate-500"}`}>
+                  {team.song} · 팀장 {leader?.name ?? "-"}
+                </span>
+              </span>
+              <span className={`h-3 w-3 shrink-0 rounded-sm ${team.color}`} />
             </button>
           );
         })}
