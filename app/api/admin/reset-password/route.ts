@@ -102,6 +102,16 @@ export async function POST(request: NextRequest) {
   });
 
   if (updateAuthError) {
+    if (updateAuthError.message.toLowerCase().includes("invalid api key")) {
+      return NextResponse.json(
+        {
+          error:
+            "Cloudflare의 SUPABASE_SERVICE_ROLE_KEY가 올바른 Supabase service_role 키가 아닙니다. Supabase Dashboard에서 service_role 키를 복사해 Cloudflare secret에 다시 저장해 주세요.",
+        },
+        { status: 500 },
+      );
+    }
+
     return NextResponse.json({ error: updateAuthError.message }, { status: 500 });
   }
 
