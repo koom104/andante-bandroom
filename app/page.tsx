@@ -1992,9 +1992,11 @@ export default function Home() {
                   />
                 )}
 
-                <p className="pb-8 pt-1 text-center text-[9px] font-medium text-[#f7e6df]" aria-hidden="true">
-                  @41기 구강민 만듦
-                </p>
+                {activeTab === "team" && (
+                  <p className="pb-8 pt-1 text-center text-[9px] font-medium text-[#f7e6df]" aria-hidden="true">
+                    @41기 구강민 만듦
+                  </p>
+                )}
               </div>
 
               <div
