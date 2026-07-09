@@ -40,26 +40,42 @@ export async function POST(request: NextRequest) {
       persistSession: false,
     },
   });
-  const authClient = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  const requesterClient = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
   });
 
-  const { data: requesterData, error: requesterError } = await authClient.auth.getUser(token);
+  const { data: requesterData, error: requesterError } = await requesterClient.auth.getUser(token);
   if (requesterError || !requesterData.user) {
     return NextResponse.json({ error: "관리자 세션을 확인할 수 없습니다. 로그아웃 후 다시 로그인해 주세요." }, { status: 401 });
   }
 
-  const { data: requesterProfile, error: requesterProfileError } = await adminClient
+  const { data: requesterProfile, error: requesterProfileError } = await requesterClient
     .from("profiles")
     .select("role,status")
     .eq("id", requesterData.user.id)
     .maybeSingle();
 
-  if (requesterProfileError || requesterProfile?.role !== "admin" || requesterProfile?.status !== "approved") {
-    return NextResponse.json({ error: "관리자만 비밀번호를 리셋할 수 있습니다." }, { status: 403 });
+  if (requesterProfileError) {
+    return NextResponse.json({ error: `관리자 프로필 확인에 실패했습니다: ${requesterProfileError.message}` }, { status: 500 });
+  }
+
+  if (!requesterProfile) {
+    return NextResponse.json({ error: "로그인 계정의 프로필을 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  if (requesterProfile.role !== "admin" || requesterProfile.status !== "approved") {
+    return NextResponse.json(
+      { error: `관리자만 비밀번호를 리셋할 수 있습니다. 현재 권한: ${requesterProfile.role} / ${requesterProfile.status}` },
+      { status: 403 },
+    );
   }
 
   const { data: targetProfile, error: targetProfileError } = await adminClient
