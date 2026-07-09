@@ -520,6 +520,28 @@ as $$
   order by rank asc, member_totals.cohort asc, member_totals.name asc;
 $$;
 
+create or replace function public.get_team_rehearsal_totals()
+returns table (
+  team_id uuid,
+  total_duration numeric
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    t.id as team_id,
+    coalesce(sum(b.duration), 0)::numeric as total_duration
+  from public.teams t
+  left join public.bookings b
+    on b.team_id = t.id
+    and b.status = 'confirmed'
+    and b.booking_date < current_date
+  group by t.id
+  order by total_duration desc, t.name asc;
+$$;
+
 create or replace function public.create_booking(
   p_team_id uuid,
   p_day text,
@@ -1032,6 +1054,7 @@ grant execute on function public.update_team(uuid, text, text, uuid, jsonb) to a
 grant execute on function public.check_signup_duplicate(text, text) to anon, authenticated;
 grant execute on function public.save_member_weekly_schedule(uuid, jsonb) to authenticated;
 grant execute on function public.get_rehearsal_leaderboard() to authenticated;
+grant execute on function public.get_team_rehearsal_totals() to authenticated;
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date) to authenticated;
 grant execute on function public.create_bookings(uuid, text, date, text, jsonb) to authenticated;
 grant execute on function public.cancel_booking(uuid, text) to authenticated;

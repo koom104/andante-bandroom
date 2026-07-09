@@ -720,6 +720,7 @@ export default function Home() {
   const [rehearsalByUser, setRehearsalByUser] = useState<Record<string, string[]>>({});
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rehearsalLeaderboardRows, setRehearsalLeaderboardRows] = useState<RehearsalRankRow[]>([]);
+  const [teamRehearsalTotals, setTeamRehearsalTotals] = useState<Record<string, number>>({});
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedBookingDate, setSelectedBookingDate] = useState(todayISO);
   const [bookingSelection, setBookingSelection] = useState<{ teamId: string; date: string; times: string[] }>({
@@ -818,6 +819,7 @@ export default function Home() {
       goalCategoryResult,
       clubRoomStatusResult,
       rehearsalLeaderboardResult,
+      teamRehearsalTotalsResult,
     ] = await Promise.all([
       supabase.from("profiles").select("*").order("created_at", { ascending: true }),
       supabase.from("teams").select("*").order("created_at", { ascending: true }),
@@ -826,6 +828,7 @@ export default function Home() {
       supabase.from("rehearsal_goal_categories").select("*").order("name", { ascending: true }),
       supabase.from("club_room_status").select("*").eq("id", 1).maybeSingle(),
       supabase.rpc("get_rehearsal_leaderboard"),
+      supabase.rpc("get_team_rehearsal_totals"),
     ]);
 
     const firstError = [profileResult, teamResult, memberResult, bookingResult].find((result) => result.error)?.error;
@@ -853,6 +856,12 @@ export default function Home() {
     const rehearsalLeaderboardError = rehearsalLeaderboardResult.error ? getErrorMessage(rehearsalLeaderboardResult.error) : "";
     if (rehearsalLeaderboardError && !isMissingSchemaError(rehearsalLeaderboardError)) {
       setDbError(rehearsalLeaderboardError);
+      setIsLoadingData(false);
+      return;
+    }
+    const teamRehearsalTotalsError = teamRehearsalTotalsResult.error ? getErrorMessage(teamRehearsalTotalsResult.error) : "";
+    if (teamRehearsalTotalsError && !isMissingSchemaError(teamRehearsalTotalsError)) {
+      setDbError(teamRehearsalTotalsError);
       setIsLoadingData(false);
       return;
     }
@@ -1020,6 +1029,12 @@ export default function Home() {
           totalDuration: Number(row.total_duration) || 0,
           rank: Number(row.rank) || 0,
         }));
+    const nextTeamRehearsalTotals = Object.fromEntries(
+      (teamRehearsalTotalsError
+        ? []
+        : ((teamRehearsalTotalsResult.data ?? []) as Array<{ team_id: string; total_duration: number }>))
+        .map((row) => [row.team_id, Number(row.total_duration) || 0]),
+    );
     const rehearsalMap: Record<string, string[]> = {};
     for (const booking of nextReservations) {
       if (booking.status !== "confirmed") {
@@ -1056,6 +1071,7 @@ export default function Home() {
     setDateOverrideByUser(dateOverrideMap);
     setRehearsalByUser(rehearsalMap);
     setRehearsalLeaderboardRows(nextRehearsalLeaderboardRows);
+    setTeamRehearsalTotals(nextTeamRehearsalTotals);
     setAllTeams(allTeams);
     setTeams(nextTeams);
     setReservations(nextReservations);
@@ -1094,6 +1110,7 @@ export default function Home() {
         setDateOverrideByUser({});
         setRehearsalByUser({});
         setRehearsalLeaderboardRows([]);
+        setTeamRehearsalTotals({});
         setReservations([]);
         setIsBooting(false);
       }
@@ -1890,6 +1907,7 @@ export default function Home() {
                     allTeams={allTeams}
                     approvedProfiles={approvedProfiles}
                     goalCategories={goalCategories}
+                    teamRehearsalTotals={teamRehearsalTotals}
                     onAddTeam={addTeam}
                     onUpdateTeam={updateTeam}
                     currentUserId={profile.id}
@@ -2823,6 +2841,7 @@ function TeamTab({
   allTeams,
   approvedProfiles,
   goalCategories,
+  teamRehearsalTotals,
   onAddTeam,
   onUpdateTeam,
   currentUserId,
@@ -2830,6 +2849,7 @@ function TeamTab({
   allTeams: Team[];
   approvedProfiles: Profile[];
   goalCategories: GoalCategory[];
+  teamRehearsalTotals: Record<string, number>;
   onAddTeam: (payload: NewTeamPayload) => Promise<void>;
   onUpdateTeam: (payload: UpdateTeamPayload) => Promise<void>;
   currentUserId: string;
@@ -3117,6 +3137,7 @@ function TeamTab({
           <div className="space-y-2">
             {registeredGoalTeams.map((team) => {
               const leaderProfile = team.members.find((member) => member.id === team.leaderId);
+              const totalRehearsalTime = teamRehearsalTotals[team.id] ?? 0;
 
               return (
                 <div key={team.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
@@ -3125,7 +3146,11 @@ function TeamTab({
                       <p className="text-sm font-semibold">{team.name}</p>
                       <p className="mt-1 text-xs text-slate-500">{team.song}</p>
                     </div>
-                    <span className={`h-3 w-3 rounded-sm ${team.color}`} />
+                    <div className="shrink-0 text-right">
+                      <span className={`ml-auto block h-3 w-3 rounded-sm ${team.color}`} />
+                      <p className="mt-2 text-[11px] font-semibold text-slate-500">총 합주시간</p>
+                      <p className="mt-0.5 text-sm font-semibold text-slate-950">{formatDuration(totalRehearsalTime)}</p>
+                    </div>
                   </div>
                   <p className="mt-2 text-xs font-semibold text-[#be3d33]">
                     팀장 {leaderProfile?.name ?? "-"} · {leaderProfile?.role ?? "-"}
