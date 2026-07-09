@@ -6,7 +6,7 @@ import { supabase } from "./supabase";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
 type Tab = "booking" | "suggestions" | "my" | "team" | "admin";
-type Role = "member" | "admin";
+type Role = "member" | "manager" | "admin";
 type ProfileStatus = "pending" | "approved" | "rejected" | "suspended";
 type SessionRole = "보컬" | "리드기타" | "세컨기타" | "어쿠스틱" | "베이스" | "드럼" | "피아노" | "신디";
 type ScheduleEditMode = "busy" | "free";
@@ -171,6 +171,26 @@ const baseTabs: Array<{ id: Tab; label: string; short: string }> = [
 ];
 
 const adminTab = { id: "admin" as const, label: "관리", short: "!" };
+
+function canUseAdminTab(profile?: Profile | null) {
+  return profile?.status === "approved" && (profile.role === "admin" || profile.role === "manager");
+}
+
+function isSuperAdmin(profile?: Profile | null) {
+  return profile?.status === "approved" && profile.role === "admin";
+}
+
+function profileRoleLabel(role: Role) {
+  if (role === "admin") {
+    return "최고 관리자";
+  }
+
+  if (role === "manager") {
+    return "집기";
+  }
+
+  return "부원";
+}
 
 async function fetchAllRows<T>(tableName: string, pageSize = 1000): Promise<{ data: T[] | null; error: unknown | null }> {
   const rows: T[] = [];
@@ -892,7 +912,7 @@ export default function Home() {
 
     const visibleTeamIds = new Set(memberRows.filter((member) => member.user_id === profile.id).map((member) => member.team_id));
     const scheduleUserIds =
-      profile.role === "admin"
+      canUseAdminTab(profile)
         ? nextProfiles.filter((item) => item.status === "approved").map((item) => item.id)
         : [profile.id, ...memberRows.filter((member) => visibleTeamIds.has(member.team_id)).map((member) => member.user_id)];
     const [scheduleResult, dateScheduleResult] = await Promise.all([
@@ -965,7 +985,7 @@ export default function Home() {
       };
     });
     const teamById = new Map(allTeams.map((team) => [team.id, team]));
-    const nextTeams = allTeams.filter((team) => profile.role === "admin" || team.members.some((member) => member.id === profile.id));
+    const nextTeams = allTeams.filter((team) => canUseAdminTab(profile) || team.members.some((member) => member.id === profile.id));
     const bookingRows = (bookingResult.data ?? []) as Array<{
       id: string;
       team_id: string;
@@ -1144,7 +1164,7 @@ export default function Home() {
   }, [profile?.status, refreshData]);
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
-  const visibleTabs = profile?.role === "admin" ? [...baseTabs, adminTab] : baseTabs;
+  const visibleTabs = canUseAdminTab(profile) ? [...baseTabs, adminTab] : baseTabs;
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
   const reservationDates = useMemo(() => threeWeekVisibleDates(), []);
@@ -1681,6 +1701,34 @@ export default function Home() {
     await refreshData();
   }
 
+  async function updateProfileRole(profileId: string, nextRole: "member" | "manager") {
+    if (!isSuperAdmin(profile)) {
+      setStatus("최고 관리자만 집기 권한을 변경할 수 있습니다.");
+      return;
+    }
+
+    const target = profiles.find((item) => item.id === profileId);
+    if (!target || target.role === "admin") {
+      setStatus("권한을 변경할 수 없는 계정입니다.");
+      return;
+    }
+
+    const confirmed = window.confirm(`${target.name} 계정을 ${nextRole === "manager" ? "집기" : "부원"} 등급으로 변경할까요?`);
+    if (!confirmed) {
+      return;
+    }
+
+    const { error } = await supabase.from("profiles").update({ role: nextRole }).eq("id", profileId);
+
+    if (error) {
+      setStatus(getErrorMessage(error));
+      return;
+    }
+
+    setStatus(`${target.name} 계정을 ${nextRole === "manager" ? "집기" : "부원"} 등급으로 변경했어요.`);
+    await refreshData();
+  }
+
   async function resetMemberPassword(userId: string) {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
@@ -1722,7 +1770,7 @@ export default function Home() {
   }
 
   async function addGoalCategory(name: string) {
-    if (!profile || profile.role !== "admin") {
+    if (!canUseAdminTab(profile)) {
       return;
     }
 
@@ -1747,7 +1795,7 @@ export default function Home() {
   }
 
   async function deleteGoalCategory(categoryId: string) {
-    if (!profile || profile.role !== "admin") {
+    if (!canUseAdminTab(profile)) {
       return;
     }
 
@@ -1820,7 +1868,7 @@ export default function Home() {
 
     if (error) {
       const message = getErrorMessage(error);
-      if (profile.role === "admin" && message.includes("cancel_booking")) {
+      if (canUseAdminTab(profile) && message.includes("cancel_booking")) {
         const fallback = await supabase
           .from("bookings")
           .update({
@@ -1968,8 +2016,9 @@ export default function Home() {
                   />
                 )}
 
-                {activeTab === "admin" && profile.role === "admin" && (
+                {activeTab === "admin" && canUseAdminTab(profile) && (
                   <AdminTab
+                    currentProfile={profile}
                     pendingProfiles={pendingProfiles}
                     approvedProfiles={approvedProfiles}
                     allTeams={allTeams}
@@ -1980,6 +2029,7 @@ export default function Home() {
                     dateOverrideByUser={dateOverrideByUser}
                     rehearsalByUser={rehearsalByUser}
                     approveProfile={approveProfile}
+                    updateProfileRole={updateProfileRole}
                     resetMemberPassword={resetMemberPassword}
                     addGoalCategory={addGoalCategory}
                     deleteGoalCategory={deleteGoalCategory}
@@ -2860,7 +2910,7 @@ function MyPageTab({
             </p>
           </div>
           <span className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs font-semibold text-[#be3d33]">
-            {profile.role === "admin" ? "관리자" : "부원"}
+            {profileRoleLabel(profile.role)}
           </span>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
@@ -3563,6 +3613,7 @@ function AdminTeamManager({
 }
 
 function AdminTab({
+  currentProfile,
   pendingProfiles,
   approvedProfiles,
   allTeams,
@@ -3573,6 +3624,7 @@ function AdminTab({
   dateOverrideByUser,
   rehearsalByUser,
   approveProfile,
+  updateProfileRole,
   resetMemberPassword,
   addGoalCategory,
   deleteGoalCategory,
@@ -3583,6 +3635,7 @@ function AdminTab({
   saveDateSchedule,
   resetDateSchedule,
 }: {
+  currentProfile: Profile;
   pendingProfiles: Profile[];
   approvedProfiles: Profile[];
   allTeams: Team[];
@@ -3593,6 +3646,7 @@ function AdminTab({
   dateOverrideByUser: Record<string, string[]>;
   rehearsalByUser: Record<string, string[]>;
   approveProfile: (profileId: string, nextStatus: "approved" | "rejected") => Promise<void>;
+  updateProfileRole: (profileId: string, nextRole: "member" | "manager") => Promise<void>;
   resetMemberPassword: (profileId: string) => Promise<string>;
   addGoalCategory: (name: string) => Promise<void>;
   deleteGoalCategory: (categoryId: string) => Promise<void>;
@@ -3604,6 +3658,10 @@ function AdminTab({
   resetDateSchedule: (userId: string, date: string) => Promise<void>;
 }) {
   const [newGoalName, setNewGoalName] = useState("");
+  const [managerTargetId, setManagerTargetId] = useState("");
+  const [managerQuery, setManagerQuery] = useState("");
+  const roleEditableProfiles = approvedProfiles.filter((profile) => profile.role !== "admin");
+  const selectedRoleProfile = roleEditableProfiles.find((profile) => profile.id === managerTargetId) ?? null;
 
   async function submitGoalCategory() {
     const trimmedGoalName = newGoalName.trim();
@@ -3624,6 +3682,46 @@ function AdminTab({
           가입 승인, 예약 취소, 부원 시간표 수정을 처리합니다.
         </p>
       </MobilePanel>
+
+      {isSuperAdmin(currentProfile) && (
+        <MobilePanel title="집기 권한 관리">
+          <div className="space-y-3">
+            <ProfileSearchPicker
+              label="부원 검색"
+              value={managerTargetId}
+              query={managerQuery}
+              onQueryChange={setManagerQuery}
+              onChange={setManagerTargetId}
+              profiles={roleEditableProfiles}
+            />
+            {selectedRoleProfile ? (
+              <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                선택된 계정: {selectedRoleProfile.name} · {selectedRoleProfile.cohort} · 현재 등급 {profileRoleLabel(selectedRoleProfile.role)}
+              </div>
+            ) : (
+              <EmptyText text="집기로 등록하거나 해제할 부원을 선택해 주세요." />
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => selectedRoleProfile && updateProfileRole(selectedRoleProfile.id, "manager")}
+                disabled={!selectedRoleProfile || selectedRoleProfile.role === "manager"}
+                className="h-10 rounded-lg bg-slate-950 text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
+              >
+                집기 등록
+              </button>
+              <button
+                type="button"
+                onClick={() => selectedRoleProfile && updateProfileRole(selectedRoleProfile.id, "member")}
+                disabled={!selectedRoleProfile || selectedRoleProfile.role === "member"}
+                className="h-10 rounded-lg border border-[#f0ded7] bg-white text-sm font-semibold text-[#be3d33] disabled:bg-slate-50 disabled:text-slate-300"
+              >
+                집기 해제
+              </button>
+            </div>
+          </div>
+        </MobilePanel>
+      )}
 
       <MobilePanel title="가입 승인">
         <div className="space-y-2">

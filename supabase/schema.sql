@@ -11,7 +11,7 @@ create table if not exists public.profiles (
   name text not null,
   cohort text not null,
   student_no text not null,
-  role text not null default 'member' check (role in ('member', 'admin')),
+  role text not null default 'member' check (role in ('member', 'manager', 'admin')),
   status text not null default 'pending' check (status in ('pending', 'approved', 'rejected', 'suspended')),
   password_reset_required boolean not null default false,
   created_at timestamptz not null default now(),
@@ -160,6 +160,22 @@ as $$
     select 1
     from public.profiles
     where id = user_id
+      and role in ('admin', 'manager')
+      and status = 'approved'
+  );
+$$;
+
+create or replace function public.is_super_admin(user_id uuid default auth.uid())
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = user_id
       and role = 'admin'
       and status = 'approved'
   );
@@ -218,6 +234,32 @@ drop trigger if exists protect_profile_insert_trigger on public.profiles;
 create trigger protect_profile_insert_trigger
 before insert on public.profiles
 for each row execute function public.protect_profile_insert();
+
+create or replace function public.protect_profile_role_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.role is distinct from new.role and auth.uid() is not null then
+    if old.role = 'admin' then
+      raise exception '최고 관리자 계정의 등급은 앱에서 변경할 수 없습니다.';
+    end if;
+
+    if not public.is_super_admin(auth.uid()) then
+      raise exception '최고 관리자만 집기 권한을 변경할 수 있습니다.';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_profile_role_update_trigger on public.profiles;
+create trigger protect_profile_role_update_trigger
+before update of role on public.profiles
+for each row execute function public.protect_profile_role_update();
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -1074,6 +1116,8 @@ grant execute on function public.complete_password_reset() to authenticated;
 grant execute on function public.save_member_weekly_schedule(uuid, jsonb) to authenticated;
 grant execute on function public.get_rehearsal_leaderboard() to authenticated;
 grant execute on function public.get_team_rehearsal_totals() to authenticated;
+grant execute on function public.is_admin(uuid) to authenticated;
+grant execute on function public.is_super_admin(uuid) to authenticated;
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date) to authenticated;
 grant execute on function public.create_bookings(uuid, text, date, text, jsonb) to authenticated;
 grant execute on function public.cancel_booking(uuid, text) to authenticated;

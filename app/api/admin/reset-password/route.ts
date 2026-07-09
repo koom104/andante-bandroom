@@ -75,9 +75,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "로그인 계정의 프로필을 찾을 수 없습니다." }, { status: 404 });
   }
 
-  if (requesterProfile.role !== "admin" || requesterProfile.status !== "approved") {
+  if (!["admin", "manager"].includes(requesterProfile.role) || requesterProfile.status !== "approved") {
     return NextResponse.json(
-      { error: `관리자만 비밀번호를 리셋할 수 있습니다. 현재 권한: ${requesterProfile.role} / ${requesterProfile.status}` },
+      { error: `관리 권한 계정만 비밀번호를 리셋할 수 있습니다. 현재 권한: ${requesterProfile.role} / ${requesterProfile.status}` },
       { status: 403 },
     );
   }
