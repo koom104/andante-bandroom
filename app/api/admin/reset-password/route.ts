@@ -1,0 +1,89 @@
+import { createClient } from "@supabase/supabase-js";
+import { NextRequest, NextResponse } from "next/server";
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+function generateTemporaryPassword() {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+}
+
+export async function POST(request: NextRequest) {
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다." }, { status: 500 });
+  }
+
+  const authorization = request.headers.get("authorization") ?? "";
+  const token = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+
+  if (!token) {
+    return NextResponse.json({ error: "관리자 로그인이 필요합니다." }, { status: 401 });
+  }
+
+  const body = (await request.json().catch(() => null)) as { userId?: string } | null;
+  const targetUserId = body?.userId;
+
+  if (!targetUserId) {
+    return NextResponse.json({ error: "리셋할 부원을 선택해 주세요." }, { status: 400 });
+  }
+
+  const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+
+  const { data: requesterData, error: requesterError } = await adminClient.auth.getUser(token);
+  if (requesterError || !requesterData.user) {
+    return NextResponse.json({ error: "관리자 로그인이 필요합니다." }, { status: 401 });
+  }
+
+  const { data: requesterProfile, error: requesterProfileError } = await adminClient
+    .from("profiles")
+    .select("role,status")
+    .eq("id", requesterData.user.id)
+    .maybeSingle();
+
+  if (requesterProfileError || requesterProfile?.role !== "admin" || requesterProfile?.status !== "approved") {
+    return NextResponse.json({ error: "관리자만 비밀번호를 리셋할 수 있습니다." }, { status: 403 });
+  }
+
+  const { data: targetProfile, error: targetProfileError } = await adminClient
+    .from("profiles")
+    .select("id,role,status")
+    .eq("id", targetUserId)
+    .maybeSingle();
+
+  if (targetProfileError || !targetProfile) {
+    return NextResponse.json({ error: "부원 계정을 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  if (targetProfile.role === "admin") {
+    return NextResponse.json({ error: "관리자 계정은 이 기능으로 리셋할 수 없습니다." }, { status: 400 });
+  }
+
+  const temporaryPassword = generateTemporaryPassword();
+  const { error: updateAuthError } = await adminClient.auth.admin.updateUserById(targetUserId, {
+    password: temporaryPassword,
+  });
+
+  if (updateAuthError) {
+    return NextResponse.json({ error: updateAuthError.message }, { status: 500 });
+  }
+
+  const { error: updateProfileError } = await adminClient
+    .from("profiles")
+    .update({ password_reset_required: true })
+    .eq("id", targetUserId);
+
+  if (updateProfileError) {
+    return NextResponse.json({ error: updateProfileError.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ temporaryPassword });
+}

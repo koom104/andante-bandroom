@@ -52,7 +52,7 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY`는 현재 앱 런타임에는 필요하지 않습니다. 저장소에 실제 service role key를 커밋하지 마세요.
+`SUPABASE_SERVICE_ROLE_KEY`는 관리자 비밀번호 리셋 API에서 필요합니다. 저장소에 실제 service role key를 커밋하지 말고, 배포 환경변수/시크릿으로만 설정하세요.
 
 ## Supabase 설정
 

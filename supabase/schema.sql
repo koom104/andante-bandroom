@@ -13,6 +13,7 @@ create table if not exists public.profiles (
   student_no text not null,
   role text not null default 'member' check (role in ('member', 'admin')),
   status text not null default 'pending' check (status in ('pending', 'approved', 'rejected', 'suspended')),
+  password_reset_required boolean not null default false,
   created_at timestamptz not null default now(),
   approved_at timestamptz,
   approved_by uuid references public.profiles(id)
@@ -438,6 +439,23 @@ as $$
       where trim(student_no) = trim(p_student_no)
     )
   );
+$$;
+
+create or replace function public.complete_password_reset()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'login required';
+  end if;
+
+  update public.profiles
+  set password_reset_required = false
+  where id = auth.uid();
+end;
 $$;
 
 create or replace function public.save_member_weekly_schedule(
@@ -1052,6 +1070,7 @@ with check (public.is_admin(auth.uid()) or actor_id = auth.uid());
 grant execute on function public.create_team(text, text, uuid, jsonb) to authenticated;
 grant execute on function public.update_team(uuid, text, text, uuid, jsonb) to authenticated;
 grant execute on function public.check_signup_duplicate(text, text) to anon, authenticated;
+grant execute on function public.complete_password_reset() to authenticated;
 grant execute on function public.save_member_weekly_schedule(uuid, jsonb) to authenticated;
 grant execute on function public.get_rehearsal_leaderboard() to authenticated;
 grant execute on function public.get_team_rehearsal_totals() to authenticated;

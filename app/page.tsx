@@ -32,6 +32,7 @@ type Profile = {
   student_no: string;
   role: Role;
   status: ProfileStatus;
+  password_reset_required?: boolean;
   created_at?: string;
 };
 
@@ -1262,6 +1263,25 @@ export default function Home() {
     setStatus("로그인 후 팀 예약을 시작할 수 있어요.");
   }
 
+  async function completePasswordReset(nextPassword: string) {
+    setStatus("");
+    const { error } = await supabase.auth.updateUser({ password: nextPassword });
+
+    if (error) {
+      setStatus(getErrorMessage(error));
+      return;
+    }
+
+    const { error: profileError } = await supabase.rpc("complete_password_reset");
+    if (profileError) {
+      setStatus(getErrorMessage(profileError));
+      return;
+    }
+
+    setProfile((current) => (current ? { ...current, password_reset_required: false } : current));
+    setStatus("비밀번호를 다시 설정했어요.");
+  }
+
   function changeTeam(teamId: string) {
     const nextTeam = teams.find((team) => team.id === teamId) ?? teams[0];
     if (!nextTeam) {
@@ -1661,6 +1681,32 @@ export default function Home() {
     await refreshData();
   }
 
+  async function resetMemberPassword(userId: string) {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+
+    if (!token) {
+      throw new Error("관리자 로그인이 필요합니다.");
+    }
+
+    const response = await fetch("/api/admin/reset-password", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ userId }),
+    });
+    const result = (await response.json().catch(() => null)) as { temporaryPassword?: string; error?: string } | null;
+
+    if (!response.ok || !result?.temporaryPassword) {
+      throw new Error(result?.error ?? "비밀번호 리셋에 실패했습니다.");
+    }
+
+    await refreshData();
+    return result.temporaryPassword;
+  }
+
   function getGoalCategoryErrorMessage(error: unknown) {
     const message = getErrorMessage(error);
 
@@ -1839,6 +1885,14 @@ export default function Home() {
     );
   }
 
+  if (profile.password_reset_required) {
+    return (
+      <PhoneShell>
+        <ForcedPasswordResetScreen status={status} onSubmit={completePasswordReset} onSignOut={signOut} />
+      </PhoneShell>
+    );
+  }
+
   return (
     <main className="app-viewport bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
@@ -1926,6 +1980,7 @@ export default function Home() {
                     dateOverrideByUser={dateOverrideByUser}
                     rehearsalByUser={rehearsalByUser}
                     approveProfile={approveProfile}
+                    resetMemberPassword={resetMemberPassword}
                     addGoalCategory={addGoalCategory}
                     deleteGoalCategory={deleteGoalCategory}
                     addTeam={addTeam}
@@ -2091,6 +2146,67 @@ function AuthScreen({
 
           <button type="button" onClick={submit} className="h-12 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white">
             {mode === "login" ? "로그인하기" : "가입 신청하기"}
+          </button>
+        </div>
+      </MobilePanel>
+    </div>
+  );
+}
+
+function ForcedPasswordResetScreen({
+  status,
+  onSubmit,
+  onSignOut,
+}: {
+  status: string;
+  onSubmit: (nextPassword: string) => Promise<void>;
+  onSignOut: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [message, setMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function submit() {
+    if (password.length < 8) {
+      setMessage("새 비밀번호는 8자 이상으로 입력해 주세요.");
+      return;
+    }
+    if (password !== passwordConfirm) {
+      setMessage("비밀번호가 일치하지 않습니다.");
+      return;
+    }
+
+    setIsSaving(true);
+    setMessage("");
+    await onSubmit(password);
+    setIsSaving(false);
+  }
+
+  return (
+    <div className="space-y-3">
+      <MobilePanel>
+        <p className="text-xs font-semibold text-[#ef6351]">비밀번호 재설정</p>
+        <h1 className="mt-2 text-2xl font-semibold">새 비밀번호를 설정해 주세요</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          관리자가 임시 비밀번호를 발급했습니다. 계속 사용하려면 새 비밀번호로 변경해야 합니다.
+        </p>
+      </MobilePanel>
+      <MobilePanel title="새 비밀번호">
+        <div className="space-y-3">
+          <LabeledInput label="새 비밀번호" value={password} onChange={setPassword} placeholder="8자 이상" type="password" />
+          <LabeledInput label="새 비밀번호 재확인" value={passwordConfirm} onChange={setPasswordConfirm} placeholder="비밀번호 다시 입력" type="password" />
+          {(message || status) && <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-[#be3d33]">{message || status}</p>}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={isSaving}
+            className="h-12 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
+          >
+            {isSaving ? "저장 중" : "비밀번호 변경하기"}
+          </button>
+          <button type="button" onClick={onSignOut} className="h-10 w-full rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-600">
+            로그아웃
           </button>
         </div>
       </MobilePanel>
@@ -3451,6 +3567,7 @@ function AdminTab({
   dateOverrideByUser,
   rehearsalByUser,
   approveProfile,
+  resetMemberPassword,
   addGoalCategory,
   deleteGoalCategory,
   addTeam,
@@ -3470,6 +3587,7 @@ function AdminTab({
   dateOverrideByUser: Record<string, string[]>;
   rehearsalByUser: Record<string, string[]>;
   approveProfile: (profileId: string, nextStatus: "approved" | "rejected") => Promise<void>;
+  resetMemberPassword: (profileId: string) => Promise<string>;
   addGoalCategory: (name: string) => Promise<void>;
   deleteGoalCategory: (categoryId: string) => Promise<void>;
   addTeam: (payload: NewTeamPayload) => Promise<void>;
@@ -3599,6 +3717,10 @@ function AdminTab({
         />
       </MobilePanel>
 
+      <MobilePanel title="계정 비밀번호 리셋">
+        <AdminPasswordResetPanel profiles={approvedProfiles} onResetPassword={resetMemberPassword} />
+      </MobilePanel>
+
       <AdminTeamManager allTeams={allTeams} approvedProfiles={approvedProfiles} goalCategories={goalCategories} onAddTeam={addTeam} onUpdateTeam={updateTeam} />
 
     </div>
@@ -3710,6 +3832,92 @@ function AdminScheduleEditor({
       ) : (
         <EmptyText text="승인된 부원이 없습니다." />
       )}
+    </div>
+  );
+}
+
+function AdminPasswordResetPanel({
+  profiles,
+  onResetPassword,
+}: {
+  profiles: Profile[];
+  onResetPassword: (profileId: string) => Promise<string>;
+}) {
+  const memberProfiles = profiles.filter((profile) => profile.role !== "admin");
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [memberQuery, setMemberQuery] = useState("");
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [isResetting, setIsResetting] = useState(false);
+  const selectedProfile = memberProfiles.find((profile) => profile.id === selectedUserId) ?? null;
+
+  async function resetPassword() {
+    if (!selectedProfile) {
+      setMessage("비밀번호를 리셋할 부원을 선택해 주세요.");
+      return;
+    }
+
+    const firstConfirm = window.confirm(`${selectedProfile.name} 부원의 비밀번호를 임시 비밀번호로 리셋할까요?`);
+    if (!firstConfirm) {
+      return;
+    }
+    const secondConfirm = window.confirm("기존 비밀번호로는 더 이상 로그인할 수 없습니다. 계속 진행할까요?");
+    if (!secondConfirm) {
+      return;
+    }
+
+    setIsResetting(true);
+    setMessage("");
+    setTemporaryPassword("");
+
+    try {
+      const nextPassword = await onResetPassword(selectedProfile.id);
+      setTemporaryPassword(nextPassword);
+      setMessage(`${selectedProfile.name} 부원의 임시 비밀번호를 발급했어요.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setIsResetting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <ProfileSearchPicker
+        label="부원 검색"
+        value={selectedUserId}
+        query={memberQuery}
+        onQueryChange={(value) => {
+          setMemberQuery(value);
+          setTemporaryPassword("");
+        }}
+        onChange={(value) => {
+          setSelectedUserId(value);
+          setTemporaryPassword("");
+        }}
+        profiles={memberProfiles}
+      />
+      <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">
+        리셋하면 임시 비밀번호가 발급되고, 부원은 다음 로그인 때 새 비밀번호를 반드시 설정해야 합니다.
+      </p>
+      {temporaryPassword && (
+        <div className="rounded-lg border border-[#ffb3aa] bg-white p-3">
+          <p className="text-xs font-semibold text-[#be3d33]">임시 비밀번호</p>
+          <p className="mt-2 select-all rounded-lg bg-slate-950 px-3 py-2 font-mono text-sm font-semibold text-white">
+            {temporaryPassword}
+          </p>
+          <p className="mt-2 text-[11px] leading-5 text-slate-500">이 값은 다시 볼 수 없으니 필요한 부원에게 바로 전달해 주세요.</p>
+        </div>
+      )}
+      {message && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{message}</p>}
+      <button
+        type="button"
+        onClick={resetPassword}
+        disabled={!selectedProfile || isResetting}
+        className="h-11 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
+      >
+        {isResetting ? "리셋 중" : "임시 비밀번호 발급"}
+      </button>
     </div>
   );
 }
