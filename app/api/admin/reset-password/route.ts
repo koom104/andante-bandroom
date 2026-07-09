@@ -14,6 +14,10 @@ function generateTemporaryPassword() {
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
+function isMissingPasswordResetColumn(message: string) {
+  return message.includes("password_reset_required") && (message.includes("schema cache") || message.includes("column"));
+}
+
 export async function POST(request: NextRequest) {
   if (!SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다." }, { status: 500 });
@@ -80,11 +84,21 @@ export async function POST(request: NextRequest) {
 
   const { data: targetProfile, error: targetProfileError } = await requesterClient
     .from("profiles")
-    .select("id,role,status")
+    .select("id,role,status,password_reset_required")
     .eq("id", targetUserId)
     .maybeSingle();
 
   if (targetProfileError) {
+    if (isMissingPasswordResetColumn(targetProfileError.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "Supabase DB에 password_reset_required 컬럼이 아직 없습니다. supabase/patch-016-password-reset.sql을 SQL Editor에서 실행한 뒤 다시 시도해 주세요.",
+        },
+        { status: 500 },
+      );
+    }
+
     return NextResponse.json({ error: `부원 계정 확인에 실패했습니다: ${targetProfileError.message}` }, { status: 500 });
   }
 
@@ -121,6 +135,16 @@ export async function POST(request: NextRequest) {
     .eq("id", targetUserId);
 
   if (updateProfileError) {
+    if (isMissingPasswordResetColumn(updateProfileError.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "임시 비밀번호는 발급됐지만 password_reset_required 컬럼이 없어 강제 변경 표시를 저장하지 못했습니다. supabase/patch-016-password-reset.sql을 실행한 뒤 다시 발급해 주세요.",
+        },
+        { status: 500 },
+      );
+    }
+
     return NextResponse.json({ error: updateProfileError.message }, { status: 500 });
   }
 
