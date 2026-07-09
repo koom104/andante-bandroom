@@ -1695,7 +1695,7 @@ export default function Home() {
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, accessToken: token }),
     });
     const result = (await response.json().catch(() => null)) as { temporaryPassword?: string; error?: string } | null;
 
