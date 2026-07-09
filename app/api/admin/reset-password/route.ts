@@ -78,13 +78,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data: targetProfile, error: targetProfileError } = await adminClient
+  const { data: targetProfile, error: targetProfileError } = await requesterClient
     .from("profiles")
     .select("id,role,status")
     .eq("id", targetUserId)
     .maybeSingle();
 
-  if (targetProfileError || !targetProfile) {
+  if (targetProfileError) {
+    return NextResponse.json({ error: `부원 계정 확인에 실패했습니다: ${targetProfileError.message}` }, { status: 500 });
+  }
+
+  if (!targetProfile) {
     return NextResponse.json({ error: "부원 계정을 찾을 수 없습니다." }, { status: 404 });
   }
 
@@ -101,7 +105,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: updateAuthError.message }, { status: 500 });
   }
 
-  const { error: updateProfileError } = await adminClient
+  const { error: updateProfileError } = await requesterClient
     .from("profiles")
     .update({ password_reset_required: true })
     .eq("id", targetUserId);
