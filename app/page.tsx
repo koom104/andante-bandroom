@@ -192,6 +192,17 @@ function profileRoleLabel(role: Role) {
   return "부원";
 }
 
+function normalizeCohort(value: string) {
+  const trimmed = value.trim();
+  const numericMatch = trimmed.match(/^0*(\d+)\s*기?$/);
+
+  if (numericMatch) {
+    return `${numericMatch[1]}기`;
+  }
+
+  return trimmed;
+}
+
 async function fetchAllRows<T>(tableName: string, pageSize = 1000): Promise<{ data: T[] | null; error: unknown | null }> {
   const rows: T[] = [];
 
@@ -2150,7 +2161,7 @@ function AuthScreen({
       email: email.trim(),
       password,
       name: name.trim(),
-      cohort: cohort.trim(),
+      cohort: normalizeCohort(cohort),
       studentNo: studentNo.trim(),
     });
   }
