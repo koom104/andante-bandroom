@@ -127,38 +127,47 @@ export async function POST(request: NextRequest) {
 
   const teamById = new Map((teams ?? []).map((team) => [(team as PushTeam).id, team as PushTeam]));
   let sent = 0;
+  let failed = 0;
+  let recipientCount = 0;
+  let subscriptionCount = 0;
 
   for (const booking of bookingRows) {
     const recipients = membersByTeam.get(booking.team_id) ?? [];
     const payload = buildBookingPushPayload(kind, booking, teamById.get(booking.team_id));
 
     for (const userId of recipients) {
-      const { data: insertedLog } = await serviceClient
-        .from("push_notification_logs")
-        .insert({
-          user_id: userId,
-          booking_id: booking.id,
-          kind,
-          notification_date: booking.booking_date,
-        })
-        .select("id")
-        .maybeSingle();
+      recipientCount += 1;
+      const userSubscriptions = subscriptionsByUser.get(userId) ?? [];
+      subscriptionCount += userSubscriptions.length;
+      let userSent = false;
 
-      if (!insertedLog) {
-        continue;
-      }
-
-      for (const subscription of subscriptionsByUser.get(userId) ?? []) {
+      for (const subscription of userSubscriptions) {
         const response = await sendWebPush(subscription, payload, config).catch(() => null);
         if (response?.status === 404 || response?.status === 410) {
           await serviceClient.from("push_subscriptions").update({ disabled_at: new Date().toISOString() }).eq("id", subscription.id);
         }
         if (response?.ok) {
           sent += 1;
+          userSent = true;
+        } else {
+          failed += 1;
         }
+      }
+
+      if (userSent) {
+        await serviceClient
+          .from("push_notification_logs")
+          .insert({
+            user_id: userId,
+            booking_id: booking.id,
+            kind,
+            notification_date: booking.booking_date,
+          })
+          .throwOnError()
+          .catch(() => undefined);
       }
     }
   }
 
-  return NextResponse.json({ ok: true, sent });
+  return NextResponse.json({ ok: true, sent, failed, recipientCount, subscriptionCount });
 }

@@ -1654,6 +1654,22 @@ export default function Home() {
     });
   }
 
+  function normalizeBookingIds(value: unknown) {
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+    }
+
+    if (typeof value === "string") {
+      return value
+        .replace(/[{}"]/g, "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    return [];
+  }
+
   async function reserveSelectedBookingTimes() {
     if (!selectedBookingTeam) {
       setActiveTab("team");
@@ -1698,7 +1714,10 @@ export default function Home() {
     const groupText = bookingGroups.map((group) => `${group.start}-${group.end}`).join(", ");
     clearBookingSelection();
     setStatus(`${formatDateLabel(selectedBookingDate)} ${groupText} 예약이 확정됐어요.`);
-    await sendBookingPushEvent((data as string[] | null) ?? [], "booking_created");
+    const pushResult = await sendBookingPushEvent(normalizeBookingIds(data), "booking_created");
+    if (pushResult && pushResult.sent === 0) {
+      setStatus(`${formatDateLabel(selectedBookingDate)} ${groupText} 예약이 확정됐어요. 알림 받을 기기가 아직 없어요.`);
+    }
     setActiveTab("booking");
     await refreshData();
   }
@@ -1782,22 +1801,28 @@ export default function Home() {
 
   async function sendBookingPushEvent(bookingIds: string[], kind: "booking_created" | "booking_cancelled") {
     if (bookingIds.length === 0) {
-      return;
+      return null;
     }
 
     const token = session?.access_token;
     if (!token) {
-      return;
+      return null;
     }
 
-    await fetch("/api/push/booking-event", {
+    const response = await fetch("/api/push/booking-event", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ bookingIds, kind }),
-    }).catch(() => undefined);
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      return null;
+    }
+
+    return (await response.json().catch(() => null)) as { sent?: number; failed?: number; recipientCount?: number; subscriptionCount?: number } | null;
   }
 
   function getGoalCategoryErrorMessage(error: unknown) {

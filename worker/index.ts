@@ -163,6 +163,8 @@ async function sendToSubscription(env: Env, subscription: PushSubscriptionRecord
   if (response?.status === 404 || response?.status === 410) {
     await disableSubscription(env, subscription.id);
   }
+
+  return response?.ok === true;
 }
 
 async function sendDailyDigest(env: Env) {
@@ -185,13 +187,8 @@ async function sendDailyDigest(env: Env) {
   }
 
   for (const [userId, userBookings] of bookingsByUser) {
-    const inserted = await supabaseInsertLog(env, {
-      user_id: userId,
-      booking_id: null,
-      kind: "daily_digest",
-      notification_date: today,
-    });
-    if (!inserted) {
+    const userSubscriptions = subscriptionsByUser.get(userId) ?? [];
+    if (userSubscriptions.length === 0) {
       continue;
     }
 
@@ -204,12 +201,23 @@ async function sendDailyDigest(env: Env) {
       .join(", ");
     const moreText = userBookings.length > 4 ? ` 외 ${userBookings.length - 4}건` : "";
 
-    for (const subscription of subscriptionsByUser.get(userId) ?? []) {
-      await sendToSubscription(env, subscription, {
+    let userSent = false;
+    for (const subscription of userSubscriptions) {
+      const sent = await sendToSubscription(env, subscription, {
         title: "오늘 합주 일정",
         body: `${userBookings.length}건: ${summary}${moreText}`,
         url: "/",
         tag: `daily-digest-${today}`,
+      });
+      userSent ||= sent;
+    }
+
+    if (userSent) {
+      await supabaseInsertLog(env, {
+        user_id: userId,
+        booking_id: null,
+        kind: "daily_digest",
+        notification_date: today,
       });
     }
   }
@@ -236,18 +244,24 @@ async function sendThirtyMinuteReminders(env: Env) {
     const payload = buildBookingPushPayload("booking_reminder", booking, teamById.get(booking.team_id));
 
     for (const userId of membersByTeam.get(booking.team_id) ?? []) {
-      const inserted = await supabaseInsertLog(env, {
-        user_id: userId,
-        booking_id: booking.id,
-        kind: "booking_reminder",
-        notification_date: booking.booking_date,
-      });
-      if (!inserted) {
+      const userSubscriptions = subscriptionsByUser.get(userId) ?? [];
+      if (userSubscriptions.length === 0) {
         continue;
       }
 
-      for (const subscription of subscriptionsByUser.get(userId) ?? []) {
-        await sendToSubscription(env, subscription, payload);
+      let userSent = false;
+      for (const subscription of userSubscriptions) {
+        const sent = await sendToSubscription(env, subscription, payload);
+        userSent ||= sent;
+      }
+
+      if (userSent) {
+        await supabaseInsertLog(env, {
+          user_id: userId,
+          booking_id: booking.id,
+          kind: "booking_reminder",
+          notification_date: booking.booking_date,
+        });
       }
     }
   }
