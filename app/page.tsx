@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { supabase } from "./supabase";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
-type Tab = "booking" | "suggestions" | "my" | "team" | "admin";
+type Tab = "booking" | "suggestions" | "calendar" | "my" | "team" | "admin";
 type Role = "member" | "manager" | "admin";
 type ProfileStatus = "pending" | "approved" | "rejected" | "suspended";
 type SessionRole = "보컬" | "리드기타" | "세컨기타" | "어쿠스틱" | "베이스" | "드럼" | "피아노" | "신디";
@@ -166,6 +166,7 @@ const allGoalFilterValue = "__all_goals__";
 const baseTabs: Array<{ id: Tab; label: string; short: string }> = [
   { id: "booking", label: "메인", short: "홈" },
   { id: "suggestions", label: "예약", short: "R" },
+  { id: "calendar", label: "캘린더", short: "C" },
   { id: "my", label: "마이", short: "M" },
   { id: "team", label: "팀", short: "+" },
 ];
@@ -315,8 +316,31 @@ function threeWeekCalendarCells(anchorDate = todayISO()) {
   return [...Array<string | null>(leadingEmptyDays).fill(null), ...futureDates];
 }
 
-function threeWeekVisibleDates(anchorDate = todayISO()) {
-  return threeWeekCalendarCells(anchorDate).filter((date): date is string => Boolean(date));
+function monthKey(date = todayISO()) {
+  return date.slice(0, 7);
+}
+
+function shiftMonth(month: string, amount: number) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const shifted = new Date(year, monthNumber - 1 + amount, 1);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthCalendarCells(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const firstDate = new Date(year, monthNumber - 1, 1);
+  const lastDay = new Date(year, monthNumber, 0).getDate();
+  const leadingEmptyDays = firstDate.getDay();
+  const dates = Array.from({ length: lastDay }, (_, index) =>
+    `${year}-${String(monthNumber).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`,
+  );
+  const cells: Array<string | null> = [...Array<string | null>(leadingEmptyDays).fill(null), ...dates];
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null);
+  }
+
+  return cells;
 }
 
 function nextDateForDay(day: Day, anchorDate = todayISO()) {
@@ -1191,7 +1215,6 @@ export default function Home() {
   const visibleTabs = canUseAdminTab(profile) ? [...baseTabs, adminTab] : baseTabs;
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
-  const reservationDates = useMemo(() => threeWeekVisibleDates(), []);
   const leaderTeams = useMemo(() => teams.filter((team) => team.leaderId === profile?.id), [teams, profile?.id]);
   const selectedBookingTeam = leaderTeams.find((team) => team.id === selectedTeamId) ?? leaderTeams[0] ?? null;
   const bookingBusy = useMemo(() => selectedBookingTeam?.busy ?? emptyBusy, [selectedBookingTeam]);
@@ -2041,7 +2064,6 @@ export default function Home() {
                     ownTeamIds={ownTeamIds}
                     leaderReservations={leaderCancelableReservations}
                     hasLeaderTeam={leaderTeams.length > 0}
-                    reservationDates={reservationDates}
                     onUpdateClubRoomStatus={updateClubRoomStatus}
                     onCancelBooking={cancelBooking}
                   />
@@ -2080,6 +2102,10 @@ export default function Home() {
                     saveDateSchedule={(date, nextBusyKeys) => saveDateScheduleDraft(profile.id, date, nextBusyKeys)}
                     resetDateSchedule={(date) => resetDateSchedule(profile.id, date)}
                   />
+                )}
+
+                {activeTab === "calendar" && (
+                  <CalendarTab reservations={upcomingReservations} ownTeamIds={ownTeamIds} />
                 )}
 
                 {activeTab === "team" && (
@@ -2571,7 +2597,6 @@ function BookingTab({
   ownTeamIds,
   leaderReservations,
   hasLeaderTeam,
-  reservationDates,
   onUpdateClubRoomStatus,
   onCancelBooking,
 }: {
@@ -2583,18 +2608,9 @@ function BookingTab({
   ownTeamIds: ReadonlySet<string>;
   leaderReservations: Reservation[];
   hasLeaderTeam: boolean;
-  reservationDates: string[];
   onUpdateClubRoomStatus: (isOpen: boolean) => Promise<void>;
   onCancelBooking: (bookingId: string, reason: string) => Promise<void>;
 }) {
-  const [selectedReservationDay, setSelectedReservationDay] = useState(todayISO);
-
-  const detailDate =
-    selectedReservationDay && reservationDates.includes(selectedReservationDay)
-      ? selectedReservationDay
-      : reservationDates.find((date) => reservations.some((reservation) => reservationMatchesDate(reservation, date))) ?? reservationDates[0];
-  const detailReservations = reservations.filter((reservation) => reservation.status === "confirmed" && reservationMatchesDate(reservation, detailDate));
-
   return (
     <div className="space-y-3">
       <ClubRoomStatusPanel
@@ -2632,19 +2648,7 @@ function BookingTab({
         </MobilePanel>
       )}
 
-      <MobilePanel title="예약 현황">
-        <p className="text-xs font-semibold text-slate-500">오늘부터 3주</p>
-        <ThreeWeekCalendar
-          selectedDate={detailDate}
-          onSelectDate={setSelectedReservationDay}
-          hasMarker={(date) => reservations.some((reservation) => reservation.status === "confirmed" && reservationMatchesDate(reservation, date))}
-        />
-        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          {formatDateLabel(detailDate)} · {detailReservations.length > 0 ? `${detailReservations.length}건 예약` : "예약 없음"}
-        </div>
-      </MobilePanel>
-
-      <ReservationDetailPanel date={detailDate} reservations={reservations} ownTeamIds={ownTeamIds} />
+      <ReservationDetailPanel title="금일 예약 상세" date={todayISO()} reservations={reservations} ownTeamIds={ownTeamIds} />
 
       {hasLeaderTeam && (
         <MobilePanel title="팀장 예약 관리">
@@ -2674,6 +2678,171 @@ function BookingTab({
         </MobilePanel>
       )}
 
+    </div>
+  );
+}
+
+function CalendarTab({
+  reservations,
+  ownTeamIds,
+}: {
+  reservations: Reservation[];
+  ownTeamIds: ReadonlySet<string>;
+}) {
+  const today = todayISO();
+  const [visibleMonth, setVisibleMonth] = useState(monthKey(today));
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const cells = monthCalendarCells(visibleMonth);
+  const reservationsByDate = useMemo(() => {
+    const grouped = new Map<string, Reservation[]>();
+
+    for (const reservation of reservations) {
+      if (reservation.status !== "confirmed") {
+        continue;
+      }
+
+      const date = reservationDisplayDate(reservation);
+      grouped.set(
+        date,
+        [...(grouped.get(date) ?? []), reservation].sort((left, right) => timeToMinutes(left.start) - timeToMinutes(right.start)),
+      );
+    }
+
+    return grouped;
+  }, [reservations]);
+  const isCompact = selectedDate !== null;
+  const [year, monthNumber] = visibleMonth.split("-").map(Number);
+
+  function moveMonth(amount: number) {
+    setVisibleMonth((current) => shiftMonth(current, amount));
+    setSelectedDate(null);
+  }
+
+  function selectToday() {
+    setVisibleMonth(monthKey(today));
+    setSelectedDate(today);
+  }
+
+  return (
+    <div className="space-y-3">
+      <MobilePanel title="전체 캘린더">
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => moveMonth(-1)}
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-[#f0ded7] bg-white text-xl text-slate-600"
+            aria-label="이전 달"
+          >
+            ‹
+          </button>
+          <div className="text-center">
+            <p className="text-base font-semibold">{year}년 {monthNumber}월</p>
+            <button type="button" onClick={selectToday} className="mt-0.5 text-[11px] font-semibold text-[#d45145]">
+              오늘로 이동
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => moveMonth(1)}
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-[#f0ded7] bg-white text-xl text-slate-600"
+            aria-label="다음 달"
+          >
+            ›
+          </button>
+        </div>
+
+        {isCompact && (
+          <button
+            type="button"
+            onClick={() => setSelectedDate(null)}
+            className="mt-3 w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-2 text-xs font-semibold text-[#b8493f]"
+          >
+            월 전체 보기
+          </button>
+        )}
+
+        <div className="mt-3 grid grid-cols-7 border-b border-[#f2e6e1] pb-1 text-center text-[11px] font-semibold text-slate-500">
+          {dateDayNames.map((day, index) => (
+            <span key={day} className={index === 0 ? "text-[#d45145]" : ""}>{day}</span>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7">
+          {cells.map((date, index) => {
+            const dayReservations = date ? reservationsByDate.get(date) ?? [] : [];
+            const isSelected = date === selectedDate;
+            const isToday = date === today;
+            const isPast = Boolean(date && date < today);
+
+            if (!date) {
+              return (
+                <div
+                  key={`empty-month-${index}`}
+                  className={`${isCompact ? "h-12" : "h-[104px]"} border-b border-[#f6ece8]`}
+                  aria-hidden="true"
+                />
+              );
+            }
+
+            return (
+              <button
+                key={date}
+                type="button"
+                onClick={() => setSelectedDate(date)}
+                className={`min-w-0 border-b border-[#f6ece8] px-0.5 pt-1 text-left transition ${
+                  isCompact ? "h-12" : "h-[104px]"
+                } ${isSelected ? "bg-[#fff4ef]" : "bg-white"}`}
+                aria-pressed={isSelected}
+                aria-label={`${formatDateLabel(date)} ${dayReservations.length}건 예약`}
+              >
+                <span
+                  className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${
+                    isSelected
+                      ? "border-2 border-[#e7a79c] text-slate-950"
+                      : isToday
+                        ? "bg-slate-950 text-white"
+                        : isPast
+                          ? "text-slate-300"
+                          : index % 7 === 0
+                            ? "text-[#d45145]"
+                            : "text-slate-700"
+                  }`}
+                >
+                  {parseISODate(date).getDate()}
+                </span>
+
+                {isCompact ? (
+                  dayReservations.length > 0 && (
+                    <span className="mt-1 flex items-center justify-center gap-0.5" aria-hidden="true">
+                      {dayReservations.slice(0, 5).map((reservation) => (
+                        <span key={reservation.id} className="h-1 w-1 rounded-full bg-[#ef8e7f]" />
+                      ))}
+                      {dayReservations.length > 5 && <span className="text-[8px] leading-none text-[#d45145]">+</span>}
+                    </span>
+                  )
+                ) : (
+                  <span className="mt-1 block space-y-0.5 overflow-hidden">
+                    {dayReservations.slice(0, 3).map((reservation) => (
+                      <span
+                        key={reservation.id}
+                        className="block truncate rounded-sm border border-[#efc9c1] bg-[#fff8f4] px-0.5 py-0.5 text-[9px] font-semibold leading-3 text-[#a84037]"
+                        title={`${reservation.start} ${reservation.teamName}`}
+                      >
+                        {reservation.teamName}
+                      </span>
+                    ))}
+                    {dayReservations.length > 3 && (
+                      <span className="block text-center text-[9px] font-semibold text-slate-400">+{dayReservations.length - 3}</span>
+                    )}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </MobilePanel>
+
+      {selectedDate && <ReservationDetailPanel date={selectedDate} reservations={reservations} ownTeamIds={ownTeamIds} />}
     </div>
   );
 }
@@ -4520,10 +4689,12 @@ function ProfileStat({ label, value }: { label: string; value: string }) {
 }
 
 function ReservationDetailPanel({
+  title,
   date,
   reservations,
   ownTeamIds,
 }: {
+  title?: string;
   date: string;
   reservations: Reservation[];
   ownTeamIds: ReadonlySet<string>;
@@ -4533,7 +4704,7 @@ function ReservationDetailPanel({
     .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
   return (
-    <MobilePanel title={`${formatDateLabel(date)} 예약 상세`}>
+    <MobilePanel title={title ?? `${formatDateLabel(date)} 예약 상세`}>
       <div className="space-y-2">
         {dayReservations.map((reservation) => {
           const isMine = ownTeamIds.has(reservation.teamId);
