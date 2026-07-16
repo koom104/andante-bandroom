@@ -4666,7 +4666,7 @@ function ReservationDetailPanel({
                       {isMine ? "내 팀" : "다른 팀"}
                     </span>
                   </div>
-                  <p className="text-[10px] leading-[13px] text-slate-500">
+                  <p className="text-[10px] leading-[14px] text-slate-500">
                     대표자 {reservation.leaderName}
                     {reservation.leaderRole ? ` · ${reservation.leaderRole}` : ""}
                   </p>
@@ -4679,11 +4679,11 @@ function ReservationDetailPanel({
               </div>
 
               <div className="-mt-px flex items-center justify-between gap-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-[13px]">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-[14px]">
                   <span><strong className="text-slate-500">길이</strong> {formatDuration(reservation.duration)}</span>
                   <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>
                 </div>
-                <p className="w-[92px] shrink-0 truncate text-center text-[10px] leading-[13px] text-slate-500">
+                <p className="w-[92px] shrink-0 truncate text-center text-[10px] leading-[14px] text-slate-500">
                   {reservation.purpose || reservation.teamSong || "합주 예약"}
                 </p>
               </div>
