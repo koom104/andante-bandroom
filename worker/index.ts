@@ -99,6 +99,15 @@ async function supabaseInsertLog(env: Env, row: Record<string, string | null>) {
     body: JSON.stringify(row),
   });
 
+  if (!response.ok) {
+    console.error("Push notification log insert failed", {
+      kind: row.kind,
+      bookingId: row.booking_id,
+      status: response.status,
+      error: await response.text(),
+    });
+  }
+
   return response.ok;
 }
 
@@ -163,10 +172,24 @@ async function loadPushContext(env: Env, bookings: PushBooking[]) {
 }
 
 async function sendToSubscription(env: Env, subscription: PushSubscriptionRecord, payload: { title: string; body: string; url?: string; tag?: string }) {
-  const response = await sendWebPush(subscription, payload, getWebPushConfig(env)).catch(() => null);
+  const response = await sendWebPush(subscription, payload, getWebPushConfig(env)).catch((error) => {
+    console.error("Web Push request failed", {
+      subscriptionId: subscription.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  });
 
   if (response?.status === 404 || response?.status === 410) {
     await disableSubscription(env, subscription.id);
+  }
+
+  if (response && !response.ok && response.status !== 404 && response.status !== 410) {
+    console.error("Web Push provider rejected request", {
+      subscriptionId: subscription.id,
+      status: response.status,
+      response: await response.text().catch(() => ""),
+    });
   }
 
   return response?.ok === true;
@@ -229,22 +252,30 @@ async function sendDailyDigest(env: Env) {
 }
 
 async function sendThirtyMinuteReminders(env: Env, scheduledTime: number) {
+  const actualRunTime = Date.now();
+  console.log("Thirty-minute reminder job started", {
+    scheduledTime: new Date(scheduledTime).toISOString(),
+    actualRunTime: new Date(actualRunTime).toISOString(),
+  });
+
   if (!env.SUPABASE_SERVICE_ROLE_KEY || !env.WEB_PUSH_PUBLIC_KEY || !env.WEB_PUSH_PRIVATE_KEY) {
     console.error("Thirty-minute reminders skipped because required secrets are missing.");
     return;
   }
 
-  // Cron delivery can be delayed. Use Cloudflare's intended run time so a late
-  // invocation does not move the five-minute booking window forward.
-  const target = kstDateParts(scheduledTime + 30 * 60 * 1000);
+  // A Worker deployment can briefly delay a Cron trigger. Keep retrying an
+  // unlogged reminder until the rehearsal starts so one missed tick does not
+  // permanently discard the notification.
+  const now = kstDateParts(actualRunTime);
   const bookings = (
     await supabaseGet<PushBooking>(
       env,
-      `bookings?select=id,team_id,booking_date,day_of_week,start_time,duration,purpose,status&status=eq.confirmed&booking_date=eq.${target.date}`,
+      `bookings?select=id,team_id,booking_date,day_of_week,start_time,duration,purpose,status&status=eq.confirmed&booking_date=eq.${now.date}`,
     )
   ).filter((booking) => {
-    const minutes = startTimeToMinutes(booking.start_time);
-    return minutes >= target.minutes && minutes < target.minutes + 5;
+    const startMinutes = startTimeToMinutes(booking.start_time);
+    const reminderMinutes = startMinutes - 30;
+    return reminderMinutes <= now.minutes && startMinutes > now.minutes;
   });
   const { teamById, membersByTeam, subscriptionsByUser } = await loadPushContext(env, bookings);
   const bookingIds = bookings.map((booking) => booking.id);
@@ -259,8 +290,9 @@ async function sendThirtyMinuteReminders(env: Env, scheduledTime: number) {
 
   console.log("Thirty-minute reminder candidates", {
     scheduledTime: new Date(scheduledTime).toISOString(),
-    targetDate: target.date,
-    targetMinutes: target.minutes,
+    actualRunTime: new Date(actualRunTime).toISOString(),
+    targetDate: now.date,
+    targetMinutes: now.minutes,
     bookingCount: bookings.length,
   });
 
