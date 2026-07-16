@@ -5,7 +5,6 @@ import { sendWebPush, type PushSubscriptionRecord } from "../../../push-utils";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_dKyziP5Nq6fTyZWkUd5OQQ_D5oyYD2P";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 function webPushConfig() {
   return {
@@ -16,14 +15,10 @@ function webPushConfig() {
 }
 
 function isMissingPushSchema(error: { code?: string; message?: string }) {
-  return error.code === "42P01" || error.code === "PGRST204" || error.code === "PGRST205";
+  return error.code === "42P01" || error.code === "PGRST202" || error.code === "PGRST204" || error.code === "PGRST205";
 }
 
 export async function POST(request: NextRequest) {
-  if (!SUPABASE_SERVICE_ROLE_KEY) {
-    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다." }, { status: 500 });
-  }
-
   const config = webPushConfig();
   if (!config.publicKey || !config.privateKey) {
     return NextResponse.json({ error: "WEB_PUSH_PUBLIC_KEY 또는 WEB_PUSH_PRIVATE_KEY가 서버 환경변수에 없습니다." }, { status: 500 });
@@ -46,12 +41,6 @@ export async function POST(request: NextRequest) {
       persistSession: false,
     },
   });
-  const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
   const { data: userData, error: userError } = await requesterClient.auth.getUser(token);
   if (userError || !userData.user) {
     return NextResponse.json({ error: "로그인 세션을 확인할 수 없습니다." }, { status: 401 });
@@ -69,16 +58,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "승인된 부원만 테스트 알림을 받을 수 있습니다." }, { status: 403 });
   }
 
-  const { data: subscriptions, error: subscriptionError } = await serviceClient
-    .from("push_subscriptions")
-    .select("id,user_id,endpoint,p256dh,auth_key")
-    .eq("user_id", userData.user.id)
-    .is("disabled_at", null);
+  const { data: subscriptions, error: subscriptionError } = await requesterClient.rpc("get_my_push_subscriptions");
   if (subscriptionError) {
     return NextResponse.json(
       {
         error: isMissingPushSchema(subscriptionError)
-          ? "Supabase SQL Editor에서 supabase/patch-018-web-push.sql을 먼저 실행해 주세요."
+          ? "Supabase SQL Editor에서 supabase/patch-018-web-push.sql과 supabase/patch-019-web-push-rpc.sql을 실행해 주세요."
           : subscriptionError.message,
       },
       { status: 500 },
@@ -104,7 +89,7 @@ export async function POST(request: NextRequest) {
     ).catch(() => null);
 
     if (response?.status === 404 || response?.status === 410) {
-      await serviceClient.from("push_subscriptions").update({ disabled_at: new Date().toISOString() }).eq("id", subscription.id);
+      await requesterClient.rpc("disable_my_push_subscription", { p_subscription_id: subscription.id });
     }
 
     if (response?.ok) {
