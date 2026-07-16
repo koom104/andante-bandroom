@@ -2700,7 +2700,7 @@ function CalendarTab({
             onClick={() => setSelectedDate(null)}
             className="w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-1.5 text-xs font-semibold text-[#b8493f]"
           >
-            3주 전체 보기
+            전체 보기
           </button>
         )}
 
