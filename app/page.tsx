@@ -8,7 +8,7 @@ type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
 type Tab = "booking" | "suggestions" | "calendar" | "my" | "team" | "admin";
 type Role = "member" | "manager" | "admin";
 type ProfileStatus = "pending" | "approved" | "rejected" | "suspended";
-type SessionRole = "보컬" | "리드기타" | "세컨기타" | "어쿠스틱" | "베이스" | "드럼" | "피아노" | "신디";
+type SessionRole = "보컬" | "리드기타" | "리듬기타" | "어쿠스틱" | "베이스" | "드럼" | "피아노" | "신디";
 type ScheduleEditMode = "busy" | "free";
 
 type ScheduleSlotSelection = {
@@ -137,7 +137,11 @@ type RehearsalRankRow = {
 
 const days: Day[] = ["월", "화", "수", "목", "금", "토", "일"];
 const dateDayNames: Day[] = ["일", "월", "화", "수", "목", "금", "토"];
-const sessionOptions: SessionRole[] = ["보컬", "리드기타", "세컨기타", "어쿠스틱", "베이스", "드럼", "피아노", "신디"];
+const sessionOptions: SessionRole[] = ["보컬", "리드기타", "리듬기타", "어쿠스틱", "베이스", "드럼", "피아노", "신디"];
+
+function normalizeSessionRole(session: string): SessionRole {
+  return session === "세컨기타" ? "리듬기타" : (session as SessionRole);
+}
 const scheduleStartMinutes = 10 * 60;
 const scheduleEndMinutes = 24 * 60;
 const slotMinutes = 30;
@@ -915,7 +919,7 @@ export default function Home() {
     const memberRows = (memberResult.data ?? []) as Array<{
       team_id: string;
       user_id: string;
-      session: SessionRole;
+      session: string;
       is_leader: boolean;
     }>;
 
@@ -987,7 +991,7 @@ export default function Home() {
           return {
             id: member.user_id,
             name: memberProfile.name,
-            role: member.session,
+            role: normalizeSessionRole(member.session),
             cohort: memberProfile.cohort,
           };
         })

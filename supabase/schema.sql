@@ -46,7 +46,7 @@ create table if not exists public.club_room_status (
 create table if not exists public.team_members (
   team_id uuid not null references public.teams(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
-  session text not null check (session in ('보컬', '리드기타', '세컨기타', '어쿠스틱', '베이스', '드럼', '피아노', '신디')),
+  session text not null check (session in ('보컬', '리드기타', '리듬기타', '어쿠스틱', '베이스', '드럼', '피아노', '신디')),
   is_leader boolean not null default false,
   created_at timestamptz not null default now(),
   primary key (team_id, user_id)
