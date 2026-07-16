@@ -2918,6 +2918,7 @@ function MyPageTab({
   const [showsLeaderboard, setShowsLeaderboard] = useState(false);
   const [pushMessage, setPushMessage] = useState("");
   const [isSavingPush, setIsSavingPush] = useState(false);
+  const [isSendingTestPush, setIsSendingTestPush] = useState(false);
   const memberships = teams
     .map((team) => {
       const member = team.members.find((item) => item.id === profile.id);
@@ -3002,6 +3003,33 @@ function MyPageTab({
     }
   }
 
+  async function sendTestPushNotification() {
+    setIsSendingTestPush(true);
+    setPushMessage("");
+
+    try {
+      const response = await fetch("/api/push/test", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({}),
+      });
+      const result = (await response.json().catch(() => null)) as { sent?: number; error?: string } | null;
+
+      if (!response.ok) {
+        throw new Error(result?.error ?? "테스트 알림 발송에 실패했습니다.");
+      }
+
+      setPushMessage(`테스트 알림을 보냈어요. (${result?.sent ?? 1}개 기기)`);
+    } catch (error) {
+      setPushMessage(getErrorMessage(error));
+    } finally {
+      setIsSendingTestPush(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <MobilePanel>
@@ -3070,6 +3098,14 @@ function MyPageTab({
           className="mt-3 h-11 w-full rounded-lg bg-slate-950 text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
         >
           {isSavingPush ? "알림 설정 중" : "이 기기에서 알림 받기"}
+        </button>
+        <button
+          type="button"
+          onClick={sendTestPushNotification}
+          disabled={isSendingTestPush}
+          className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
+        >
+          {isSendingTestPush ? "테스트 발송 중" : "테스트 알림 보내기"}
         </button>
       </MobilePanel>
 

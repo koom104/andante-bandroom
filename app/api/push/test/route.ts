@@ -1,0 +1,116 @@
+import { createClient } from "@supabase/supabase-js";
+import { NextRequest, NextResponse } from "next/server";
+import { sendWebPush, type PushSubscriptionRecord } from "../../../push-utils";
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_dKyziP5Nq6fTyZWkUd5OQQ_D5oyYD2P";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+function webPushConfig() {
+  return {
+    publicKey: process.env.WEB_PUSH_PUBLIC_KEY ?? "",
+    privateKey: process.env.WEB_PUSH_PRIVATE_KEY ?? "",
+    subject: process.env.WEB_PUSH_SUBJECT ?? "mailto:admin@example.com",
+  };
+}
+
+export async function POST(request: NextRequest) {
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다." }, { status: 500 });
+  }
+
+  const config = webPushConfig();
+  if (!config.publicKey || !config.privateKey) {
+    return NextResponse.json({ error: "WEB_PUSH_PUBLIC_KEY 또는 WEB_PUSH_PRIVATE_KEY가 서버 환경변수에 없습니다." }, { status: 500 });
+  }
+
+  const authorization = request.headers.get("authorization") ?? "";
+  const token = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+  if (!token) {
+    return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  }
+
+  const requesterClient = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+  const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+  const { data: userData, error: userError } = await requesterClient.auth.getUser(token);
+  if (userError || !userData.user) {
+    return NextResponse.json({ error: "로그인 세션을 확인할 수 없습니다." }, { status: 401 });
+  }
+
+  const { data: profile, error: profileError } = await requesterClient
+    .from("profiles")
+    .select("id,name,status")
+    .eq("id", userData.user.id)
+    .maybeSingle();
+  if (profileError) {
+    return NextResponse.json({ error: profileError.message }, { status: 500 });
+  }
+  if (!profile || profile.status !== "approved") {
+    return NextResponse.json({ error: "승인된 부원만 테스트 알림을 받을 수 있습니다." }, { status: 403 });
+  }
+
+  const { data: subscriptions, error: subscriptionError } = await serviceClient
+    .from("push_subscriptions")
+    .select("id,user_id,endpoint,p256dh,auth_key")
+    .eq("user_id", userData.user.id)
+    .is("disabled_at", null);
+  if (subscriptionError) {
+    return NextResponse.json(
+      {
+        error: subscriptionError.message.includes("push_subscriptions")
+          ? "Supabase SQL Editor에서 supabase/patch-018-web-push.sql을 먼저 실행해 주세요."
+          : subscriptionError.message,
+      },
+      { status: 500 },
+    );
+  }
+
+  const activeSubscriptions = (subscriptions ?? []) as PushSubscriptionRecord[];
+  if (activeSubscriptions.length === 0) {
+    return NextResponse.json({ error: "저장된 알림 구독이 없습니다. 먼저 이 기기에서 알림 받기를 눌러 주세요." }, { status: 404 });
+  }
+
+  let sent = 0;
+  for (const subscription of activeSubscriptions) {
+    const response = await sendWebPush(
+      subscription,
+      {
+        title: "Andante 테스트 알림",
+        body: `${profile.name}님, 웹푸시 알림이 정상 연결됐어요.`,
+        url: "/",
+        tag: `push-test-${userData.user.id}`,
+      },
+      config,
+    ).catch(() => null);
+
+    if (response?.status === 404 || response?.status === 410) {
+      await serviceClient.from("push_subscriptions").update({ disabled_at: new Date().toISOString() }).eq("id", subscription.id);
+    }
+
+    if (response?.ok) {
+      sent += 1;
+    }
+  }
+
+  if (sent === 0) {
+    return NextResponse.json({ error: "알림 발송에 실패했습니다. 브라우저 알림 권한을 다시 확인해 주세요." }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true, sent });
+}
