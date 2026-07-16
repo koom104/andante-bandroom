@@ -34,6 +34,35 @@ html {
   min-height: 100%;
 }
 
+/* Increase compact calendar and reservation copy without changing other tabs. */
+.readable-compact .text-\[8px\] {
+  font-size: 9px;
+}
+
+.readable-compact .text-\[9px\] {
+  font-size: 10px;
+}
+
+.readable-compact .text-\[10px\] {
+  font-size: 11px;
+}
+
+.readable-compact .text-\[11px\] {
+  font-size: 12px;
+}
+
+.readable-compact .text-xs {
+  font-size: 13px;
+}
+
+.readable-compact .text-\[13px\] {
+  font-size: 14px;
+}
+
+.readable-compact .text-sm {
+  font-size: 15px;
+}
+
 .app-viewport {
   height: 100vh;
   height: 100dvh;

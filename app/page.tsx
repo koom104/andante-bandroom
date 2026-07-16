@@ -2593,7 +2593,7 @@ function BookingTab({
       />
 
       {selectedTeam && (
-        <MobilePanel title="합주 일정">
+        <MobilePanel title="합주 일정" className="readable-compact">
           <div className={`space-y-1 ${ownTeamReservations.length >= 4 ? "max-h-64 overflow-y-auto pr-1" : ""}`}>
             {ownTeamReservations.map((reservation) => {
               const date = reservationDisplayDate(reservation);
@@ -2686,7 +2686,7 @@ function CalendarTab({
 
   return (
     <div className="space-y-3">
-      <MobilePanel title="캘린더">
+      <MobilePanel title="캘린더" className="readable-compact">
         <p className="text-xs font-semibold text-slate-500">오늘부터 3주</p>
 
         {isCompact && (
@@ -4608,9 +4608,9 @@ function TeamSearchPicker({
   );
 }
 
-function MobilePanel({ title, children }: { title?: string; children: ReactNode }) {
+function MobilePanel({ title, children, className = "" }: { title?: string; children: ReactNode; className?: string }) {
   return (
-    <section className="rounded-lg border border-[#f0ded7] bg-white/88 p-4 shadow-sm">
+    <section className={`rounded-lg border border-[#f0ded7] bg-white/88 p-4 shadow-sm ${className}`}>
       {title && <h3 className="mb-3 text-sm font-semibold text-slate-900">{title}</h3>}
       {children}
     </section>
@@ -4642,7 +4642,7 @@ function ReservationDetailPanel({
     .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
   return (
-    <MobilePanel title={title ?? `${formatDateLabel(date)} 예약 상세`}>
+    <MobilePanel title={title ?? `${formatDateLabel(date)} 예약 상세`} className="readable-compact">
       <div className="space-y-1">
         {dayReservations.map((reservation) => {
           const isMine = ownTeamIds.has(reservation.teamId);
@@ -4671,9 +4671,14 @@ function ReservationDetailPanel({
                     {reservation.leaderRole ? ` · ${reservation.leaderRole}` : ""}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center rounded bg-slate-950 px-2 py-1.5 text-right text-white">
-                  <p className="text-[11px] font-semibold leading-4">
-                    {reservation.start}-{addHours(reservation.start, reservation.duration)}
+                <div className="flex max-w-[46%] shrink-0 flex-col items-end gap-0.5">
+                  <div className="flex items-center rounded bg-slate-950 px-2 py-1.5 text-right text-white">
+                    <p className="text-[11px] font-semibold leading-4">
+                      {reservation.start}-{addHours(reservation.start, reservation.duration)}
+                    </p>
+                  </div>
+                  <p className="max-w-full truncate text-[10px] leading-4 text-slate-500">
+                    목적 {reservation.purpose || reservation.teamSong || "합주 예약"}
                   </p>
                 </div>
               </div>
@@ -4681,11 +4686,6 @@ function ReservationDetailPanel({
               <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4">
                 <span><strong className="text-slate-500">길이</strong> {formatDuration(reservation.duration)}</span>
                 <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>
-              </div>
-
-              <div className="mt-1 rounded bg-slate-50 px-2 py-1 text-[10px] leading-4">
-                <span className="font-semibold text-slate-500">목적</span>{" "}
-                <span className="text-slate-700">{reservation.purpose || reservation.teamSong || "합주 예약"}</span>
               </div>
             </article>
           );
