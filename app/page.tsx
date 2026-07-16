@@ -165,8 +165,8 @@ const allGoalFilterValue = "__all_goals__";
 
 const baseTabs: Array<{ id: Tab; label: string; short: string }> = [
   { id: "booking", label: "메인", short: "홈" },
-  { id: "suggestions", label: "예약", short: "R" },
   { id: "calendar", label: "캘린더", short: "C" },
+  { id: "suggestions", label: "예약", short: "R" },
   { id: "my", label: "마이", short: "M" },
   { id: "team", label: "팀", short: "+" },
 ];
@@ -314,33 +314,6 @@ function threeWeekCalendarCells(anchorDate = todayISO()) {
   const futureDates = Array.from({ length: 21 }, (_, index) => addDays(anchorDate, index));
 
   return [...Array<string | null>(leadingEmptyDays).fill(null), ...futureDates];
-}
-
-function monthKey(date = todayISO()) {
-  return date.slice(0, 7);
-}
-
-function shiftMonth(month: string, amount: number) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  const shifted = new Date(year, monthNumber - 1 + amount, 1);
-  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthCalendarCells(month: string) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  const firstDate = new Date(year, monthNumber - 1, 1);
-  const lastDay = new Date(year, monthNumber, 0).getDate();
-  const leadingEmptyDays = firstDate.getDay();
-  const dates = Array.from({ length: lastDay }, (_, index) =>
-    `${year}-${String(monthNumber).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`,
-  );
-  const cells: Array<string | null> = [...Array<string | null>(leadingEmptyDays).fill(null), ...dates];
-
-  while (cells.length % 7 !== 0) {
-    cells.push(null);
-  }
-
-  return cells;
 }
 
 function nextDateForDay(day: Day, anchorDate = todayISO()) {
@@ -2648,7 +2621,7 @@ function BookingTab({
         </MobilePanel>
       )}
 
-      <ReservationDetailPanel title="금일 예약 상세" date={todayISO()} reservations={reservations} ownTeamIds={ownTeamIds} />
+      <ReservationDetailPanel title="금일 예약" date={todayISO()} reservations={reservations} ownTeamIds={ownTeamIds} />
 
       {hasLeaderTeam && (
         <MobilePanel title="팀장 예약 관리">
@@ -2690,9 +2663,8 @@ function CalendarTab({
   ownTeamIds: ReadonlySet<string>;
 }) {
   const today = todayISO();
-  const [visibleMonth, setVisibleMonth] = useState(monthKey(today));
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const cells = monthCalendarCells(visibleMonth);
+  const cells = useMemo(() => threeWeekCalendarCells(today), [today]);
   const reservationsByDate = useMemo(() => {
     const grouped = new Map<string, Reservation[]>();
 
@@ -2711,57 +2683,23 @@ function CalendarTab({
     return grouped;
   }, [reservations]);
   const isCompact = selectedDate !== null;
-  const [year, monthNumber] = visibleMonth.split("-").map(Number);
-
-  function moveMonth(amount: number) {
-    setVisibleMonth((current) => shiftMonth(current, amount));
-    setSelectedDate(null);
-  }
-
-  function selectToday() {
-    setVisibleMonth(monthKey(today));
-    setSelectedDate(today);
-  }
 
   return (
     <div className="space-y-3">
-      <MobilePanel title="전체 캘린더">
-        <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => moveMonth(-1)}
-            className="flex h-9 w-9 items-center justify-center rounded-md border border-[#f0ded7] bg-white text-xl text-slate-600"
-            aria-label="이전 달"
-          >
-            ‹
-          </button>
-          <div className="text-center">
-            <p className="text-base font-semibold">{year}년 {monthNumber}월</p>
-            <button type="button" onClick={selectToday} className="mt-0.5 text-[11px] font-semibold text-[#d45145]">
-              오늘로 이동
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => moveMonth(1)}
-            className="flex h-9 w-9 items-center justify-center rounded-md border border-[#f0ded7] bg-white text-xl text-slate-600"
-            aria-label="다음 달"
-          >
-            ›
-          </button>
-        </div>
+      <MobilePanel title="캘린더">
+        <p className="text-xs font-semibold text-slate-500">오늘부터 3주</p>
 
         {isCompact && (
           <button
             type="button"
             onClick={() => setSelectedDate(null)}
-            className="mt-3 w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-2 text-xs font-semibold text-[#b8493f]"
+            className="mt-2 w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-1.5 text-xs font-semibold text-[#b8493f]"
           >
-            월 전체 보기
+            3주 전체 보기
           </button>
         )}
 
-        <div className="mt-3 grid grid-cols-7 border-b border-[#f2e6e1] pb-1 text-center text-[11px] font-semibold text-slate-500">
+        <div className="mt-2 grid grid-cols-7 border-b border-[#f2e6e1] pb-1 text-center text-[11px] font-semibold text-slate-500">
           {dateDayNames.map((day, index) => (
             <span key={day} className={index === 0 ? "text-[#d45145]" : ""}>{day}</span>
           ))}
@@ -2778,7 +2716,7 @@ function CalendarTab({
               return (
                 <div
                   key={`empty-month-${index}`}
-                  className={`${isCompact ? "h-12" : "h-[104px]"} border-b border-[#f6ece8]`}
+                  className={isCompact ? "h-11" : "h-[124px]"}
                   aria-hidden="true"
                 />
               );
@@ -2789,14 +2727,14 @@ function CalendarTab({
                 key={date}
                 type="button"
                 onClick={() => setSelectedDate(date)}
-                className={`min-w-0 border-b border-[#f6ece8] px-0.5 pt-1 text-left transition ${
-                  isCompact ? "h-12" : "h-[104px]"
+                className={`flex min-w-0 flex-col items-stretch justify-start px-0.5 pt-1 text-left transition ${
+                  isCompact ? "h-11" : "h-[124px]"
                 } ${isSelected ? "bg-[#fff4ef]" : "bg-white"}`}
                 aria-pressed={isSelected}
                 aria-label={`${formatDateLabel(date)} ${dayReservations.length}건 예약`}
               >
                 <span
-                  className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${
+                  className={`mx-auto flex h-6 min-w-8 max-w-[42px] items-center justify-center rounded-md px-1 text-[10px] font-semibold ${
                     isSelected
                       ? "border-2 border-[#e7a79c] text-slate-950"
                       : isToday
@@ -2808,7 +2746,7 @@ function CalendarTab({
                             : "text-slate-700"
                   }`}
                 >
-                  {parseISODate(date).getDate()}
+                  {formatDateShort(date)}
                 </span>
 
                 {isCompact ? (
@@ -2822,7 +2760,7 @@ function CalendarTab({
                   )
                 ) : (
                   <span className="mt-1 block space-y-0.5 overflow-hidden">
-                    {dayReservations.slice(0, 3).map((reservation) => (
+                    {dayReservations.slice(0, 4).map((reservation) => (
                       <span
                         key={reservation.id}
                         className="block truncate rounded-sm border border-[#efc9c1] bg-[#fff8f4] px-0.5 py-0.5 text-[9px] font-semibold leading-3 text-[#a84037]"
@@ -2831,8 +2769,8 @@ function CalendarTab({
                         {reservation.teamName}
                       </span>
                     ))}
-                    {dayReservations.length > 3 && (
-                      <span className="block text-center text-[9px] font-semibold text-slate-400">+{dayReservations.length - 3}</span>
+                    {dayReservations.length > 4 && (
+                      <span className="block text-center text-[9px] font-semibold text-slate-400">+{dayReservations.length - 4}</span>
                     )}
                   </span>
                 )}
@@ -4705,51 +4643,50 @@ function ReservationDetailPanel({
 
   return (
     <MobilePanel title={title ?? `${formatDateLabel(date)} 예약 상세`}>
-      <div className="space-y-2">
+      <div className="space-y-1">
         {dayReservations.map((reservation) => {
           const isMine = ownTeamIds.has(reservation.teamId);
 
           return (
             <article
               key={reservation.id}
-              className={`rounded-lg border p-3 ${
+              className={`rounded-md border p-2 ${
                 isMine ? "border-[#ffb3aa] bg-[#fff8f4]" : "border-[#f0ded7] bg-white"
               }`}
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <h4 className="truncate text-base font-semibold">{reservation.teamName}</h4>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <h4 className="truncate text-[13px] font-semibold leading-4">{reservation.teamName}</h4>
                     <span
-                      className={`rounded-md px-2 py-1 text-[11px] font-semibold ${
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
                         isMine ? "bg-[#ff665a] text-white" : "bg-slate-100 text-slate-600"
                       }`}
                     >
                       {isMine ? "내 팀" : "다른 팀"}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="text-[10px] leading-4 text-slate-500">
                     대표자 {reservation.leaderName}
                     {reservation.leaderRole ? ` · ${reservation.leaderRole}` : ""}
                   </p>
                 </div>
-                <div className="shrink-0 rounded-lg bg-slate-950 px-3 py-2 text-right text-white">
-                  <p className="text-xs text-slate-300">예약 시간</p>
-                  <p className="mt-0.5 text-sm font-semibold">
+                <div className="flex shrink-0 items-center rounded bg-slate-950 px-2 py-1.5 text-right text-white">
+                  <p className="text-[11px] font-semibold leading-4">
                     {reservation.start}-{addHours(reservation.start, reservation.duration)}
                   </p>
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                <ReservationMeta label="길이" value={formatDuration(reservation.duration)} />
-                <ReservationMeta label="멤버" value={reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"} />
-                <ReservationMeta label="날짜" value={reservation.bookingDate ? formatDateShort(reservation.bookingDate) : `${reservation.day} 반복`} />
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4">
+                <span><strong className="text-slate-500">길이</strong> {formatDuration(reservation.duration)}</span>
+                <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>
+                <span><strong className="text-slate-500">날짜</strong> {reservation.bookingDate ? formatDateShort(reservation.bookingDate) : `${reservation.day} 반복`}</span>
               </div>
 
-              <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2">
-                <p className="text-[11px] font-semibold text-slate-500">예약 목적</p>
-                <p className="mt-1 text-sm leading-5 text-slate-700">{reservation.purpose || reservation.teamSong || "합주 예약"}</p>
+              <div className="mt-1 rounded bg-slate-50 px-2 py-1 text-[10px] leading-4">
+                <span className="font-semibold text-slate-500">목적</span>{" "}
+                <span className="text-slate-700">{reservation.purpose || reservation.teamSong || "합주 예약"}</span>
               </div>
             </article>
           );
@@ -4757,15 +4694,6 @@ function ReservationDetailPanel({
         {dayReservations.length === 0 && <EmptyText text={`${formatDateLabel(date)}에는 아직 예약이 없습니다.`} />}
       </div>
     </MobilePanel>
-  );
-}
-
-function ReservationMeta({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="font-semibold text-slate-500">{label}</p>
-      <p className="mt-1 font-semibold text-slate-950">{value}</p>
-    </div>
   );
 }
 
