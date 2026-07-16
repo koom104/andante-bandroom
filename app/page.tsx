@@ -1189,7 +1189,7 @@ export default function Home() {
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
   const leaderTeams = useMemo(() => teams.filter((team) => team.leaderId === profile?.id), [teams, profile?.id]);
-  const selectedBookingTeam = leaderTeams.find((team) => team.id === selectedTeamId) ?? leaderTeams[0] ?? null;
+  const selectedBookingTeam = leaderTeams.find((team) => team.id === selectedTeamId) ?? null;
   const bookingBusy = useMemo(() => selectedBookingTeam?.busy ?? emptyBusy, [selectedBookingTeam]);
   const selectedBookingTeamRehearsals = useMemo(
     () => Object.fromEntries((selectedBookingTeam?.members ?? []).map((member) => [member.id, rehearsalByUser[member.id] ?? []])),
@@ -1323,7 +1323,7 @@ export default function Home() {
   }
 
   function changeTeam(teamId: string) {
-    const nextTeam = teams.find((team) => team.id === teamId) ?? teams[0];
+    const nextTeam = leaderTeams.find((team) => team.id === teamId);
     if (!nextTeam) {
       return;
     }
@@ -2136,7 +2136,12 @@ export default function Home() {
                     <button
                       key={tab.id}
                       type="button"
-                      onClick={() => setActiveTab(tab.id)}
+                      onClick={() => {
+                        if (tab.id === "suggestions" && activeTab !== "suggestions") {
+                          setSelectedTeamId("");
+                        }
+                        setActiveTab(tab.id);
+                      }}
                       className={`flex h-12 flex-col items-center justify-center rounded-lg text-xs font-semibold transition ${
                         activeTab === tab.id ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-[#f7e8e1]"
                       }`}
@@ -2508,28 +2513,30 @@ function ThreeWeekCalendar({
   selectedDate,
   onSelectDate,
   hasMarker,
+  compact = false,
 }: {
   selectedDate: string;
   onSelectDate: (date: string) => void;
   hasMarker?: (date: string) => boolean;
+  compact?: boolean;
 }) {
   const cells = threeWeekCalendarCells();
 
   return (
-    <div className="mt-3">
+    <div className={compact ? "mt-0" : "mt-3"}>
       <div className="mb-1 grid grid-cols-7 text-center text-[11px] font-semibold text-slate-500">
         {dateDayNames.map((day, index) => (
           <span
             key={day}
-            className={`flex h-6 items-center justify-center ${index === 0 ? "" : "border-l border-slate-200/60"}`}
+            className={`flex ${compact ? "h-5" : "h-6"} items-center justify-center ${index === 0 ? "" : "border-l border-slate-200/60"}`}
           >
             {day}
           </span>
         ))}
       </div>
-      <div className="grid grid-cols-7 gap-y-1">
+      <div className={`grid grid-cols-7 ${compact ? "gap-y-0.5" : "gap-y-1"}`}>
         {cells.map((date, index) => {
-          const cellClassName = `flex h-10 items-center justify-center ${index % 7 === 0 ? "" : "border-l border-slate-200/60"}`;
+          const cellClassName = `flex ${compact ? "h-[38px]" : "h-10"} items-center justify-center ${index % 7 === 0 ? "" : "border-l border-slate-200/60"}`;
 
           if (!date) {
             return <div key={`empty-${index}`} className={cellClassName} aria-hidden="true" />;
@@ -2543,7 +2550,7 @@ function ThreeWeekCalendar({
               <button
                 type="button"
                 onClick={() => onSelectDate(date)}
-                className={`h-10 w-10 rounded-md px-1 py-1 text-center transition ${
+                className={`${compact ? "h-[38px] w-[38px]" : "h-10 w-10"} rounded-md px-1 py-1 text-center transition ${
                   isSelected ? "border-2 border-[#efb7ae] bg-transparent text-slate-950" : "border border-transparent bg-transparent text-slate-700"
                 }`}
                 aria-pressed={isSelected}
@@ -2687,13 +2694,11 @@ function CalendarTab({
   return (
     <div className="space-y-3">
       <MobilePanel title="캘린더" className="readable-compact">
-        <p className="text-xs font-semibold text-slate-500">오늘부터 3주</p>
-
         {isCompact && (
           <button
             type="button"
             onClick={() => setSelectedDate(null)}
-            className="mt-2 w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-1.5 text-xs font-semibold text-[#b8493f]"
+            className="w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-1.5 text-xs font-semibold text-[#b8493f]"
           >
             3주 전체 보기
           </button>
@@ -2824,12 +2829,15 @@ function SuggestionsTab({
       <MobilePanel title="예약 팀 선택">
         {leaderTeams.length > 0 ? (
           <label className="block">
-            <span className="text-xs font-semibold text-slate-500">예약할 팀</span>
             <select
+              aria-label="예약할 팀"
               value={selectedTeam?.id ?? ""}
               onChange={(event) => changeTeam(event.target.value)}
-              className="mt-2 h-11 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm font-semibold outline-none transition focus:border-[#ff665a]"
+              className="reservation-team-select h-9 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-[13px] font-semibold outline-none transition focus:border-[#ff665a]"
             >
+              <option value="">
+                팀을 선택해 주세요
+              </option>
               {leaderTeams.map((team) => (
                 <option key={team.id} value={team.id}>
                   {team.name} · {team.song || "합주 목표 없음"}
@@ -2842,22 +2850,13 @@ function SuggestionsTab({
         )}
       </MobilePanel>
 
-      {!selectedTeam && <EmptyState title="예약할 수 있는 팀이 없습니다" />}
-
       {selectedTeam && (
         <>
       <MobilePanel title="날짜 선택">
-        <label className="block">
-          <span className="text-xs font-semibold text-slate-500">예약 날짜</span>
-          <div className="mt-2 flex h-11 w-full items-center rounded-lg border border-[#f0ded7] bg-white px-3 text-sm font-semibold">
-            {selectedDate}
-          </div>
-        </label>
-        <p className="mt-3 text-xs font-semibold text-slate-500">오늘부터 3주</p>
-        <ThreeWeekCalendar selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+        <ThreeWeekCalendar selectedDate={selectedDate} onSelectDate={setSelectedDate} compact />
       </MobilePanel>
 
-      <MobilePanel title="예약 가능 시간">
+      <MobilePanel title={`예약 가능 시간 · ${formatDateLabel(selectedDate)}`}>
         <div className="grid grid-cols-4 gap-1">
           {slotFilterOptions.map((option) => (
             <button
@@ -2922,8 +2921,8 @@ function SuggestionsTab({
           }
 
           return (
-            <MobilePanel key={band.id} title={`${band.label} ${band.range}`}>
-              <div className="space-y-2">
+            <MobilePanel key={band.id} title={`${band.label} ${band.range}`} className="!p-3 [&>h3]:mb-2">
+              <div className="space-y-1.5">
                 {bandSlots.map((slot) => (
                   <BookingSlotRow
                     key={slot.time}
@@ -2973,8 +2972,8 @@ function BookingSlotRow({
           : "bg-rose-50 text-rose-700";
 
   return (
-    <div className={`rounded-lg border p-3 ${isSelected ? "border-[#ff665a] bg-[#fff8f4]" : "border-[#f0ded7] bg-white"}`}>
-      <div className="flex items-start justify-between gap-3">
+    <div className={`rounded-lg border px-3 py-2 ${isSelected ? "border-[#ff665a] bg-[#fff8f4]" : "border-[#f0ded7] bg-white"}`}>
+      <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold">
             {slot.time}-{slot.end}
@@ -2989,9 +2988,9 @@ function BookingSlotRow({
       </div>
 
       {slot.absent.length > 0 && slot.status !== "reserved" && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
           {slot.absent.map((member) => (
-            <span key={member.id} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">
+            <span key={member.id} className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
               {member.name} {slot.absentReasons[member.id] ?? "불가"}
             </span>
           ))}
@@ -3002,7 +3001,7 @@ function BookingSlotRow({
         type="button"
         disabled={disabled}
         onClick={() => onToggle(slot.time)}
-        className={`mt-3 h-10 w-full rounded-lg text-sm font-semibold ${
+        className={`mt-2 h-9 w-full rounded-lg text-sm font-semibold ${
           disabled
             ? "bg-slate-100 text-slate-400"
             : isSelected
@@ -3224,29 +3223,6 @@ function MyPageTab({
         )}
       </MobilePanel>
 
-      <MobilePanel title="푸시 알림">
-        <p className="text-xs leading-5 text-slate-500">
-          합주 당일 오전 9시, 시작 30분 전, 일정 추가/취소 알림을 이 기기로 받을 수 있습니다. iPhone은 홈 화면에 추가한 Andante에서 허용해야 안정적으로 동작합니다.
-        </p>
-        {pushMessage && <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{pushMessage}</p>}
-        <button
-          type="button"
-          onClick={enablePushNotifications}
-          disabled={isSavingPush}
-          className="mt-3 h-11 w-full rounded-lg bg-slate-950 text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
-        >
-          {isSavingPush ? "알림 설정 중" : "이 기기에서 알림 받기"}
-        </button>
-        <button
-          type="button"
-          onClick={sendTestPushNotification}
-          disabled={isSendingTestPush}
-          className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
-        >
-          {isSendingTestPush ? "테스트 발송 중" : "테스트 알림 보내기"}
-        </button>
-      </MobilePanel>
-
       <MobilePanel title="소속 팀">
         <div className={`space-y-2 ${teamListClassName}`}>
           {memberships.map(({ team, role }) => (
@@ -3297,6 +3273,29 @@ function MyPageTab({
           }
           onResetDateOverride={scheduleScope === "date" && dateHasOverride ? () => resetDateSchedule(scheduleDate) : undefined}
         />
+      </MobilePanel>
+
+      <MobilePanel title="푸시 알림">
+        <p className="text-xs leading-5 text-slate-500">
+          합주 당일 오전 9시, 시작 30분 전, 일정 추가/취소 알림을 이 기기로 받을 수 있습니다. iPhone은 홈 화면에 추가한 Andante에서 허용해야 안정적으로 동작합니다.
+        </p>
+        {pushMessage && <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{pushMessage}</p>}
+        <button
+          type="button"
+          onClick={enablePushNotifications}
+          disabled={isSavingPush}
+          className="mt-3 h-11 w-full rounded-lg bg-slate-950 text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
+        >
+          {isSavingPush ? "알림 설정 중" : "이 기기에서 알림 받기"}
+        </button>
+        <button
+          type="button"
+          onClick={sendTestPushNotification}
+          disabled={isSendingTestPush}
+          className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
+        >
+          {isSendingTestPush ? "테스트 발송 중" : "테스트 알림 보내기"}
+        </button>
       </MobilePanel>
     </div>
   );
@@ -4678,7 +4677,7 @@ function ReservationDetailPanel({
                 </div>
               </div>
 
-              <div className="-mt-px flex items-center justify-between gap-2">
+              <div className="mt-px flex items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4">
                   <span><strong className="text-slate-500">길이</strong> {formatDuration(reservation.duration)}</span>
                   <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>

@@ -113,4 +113,9 @@ html {
   .app-shell-scroll select {
     font-size: 16px !important;
   }
+
+  .app-scroll select.reservation-team-select,
+  .app-shell-scroll select.reservation-team-select {
+    font-size: 13px !important;
+  }
 }
