@@ -203,6 +203,19 @@ function normalizeCohort(value: string) {
   return trimmed;
 }
 
+function base64UrlToBytes(value: string) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
 async function fetchAllRows<T>(tableName: string, pageSize = 1000): Promise<{ data: T[] | null; error: unknown | null }> {
   const rows: T[] = [];
 
@@ -1665,7 +1678,7 @@ export default function Home() {
     const bookingDay = dateToDay(selectedBookingDate);
     const bookingGroups = groupBookingTimes(validTimes);
 
-    const { error } = await supabase.rpc("create_bookings", {
+    const { data, error } = await supabase.rpc("create_bookings", {
       p_team_id: selectedBookingTeam.id,
       p_day: bookingDay,
       p_booking_date: selectedBookingDate,
@@ -1685,6 +1698,7 @@ export default function Home() {
     const groupText = bookingGroups.map((group) => `${group.start}-${group.end}`).join(", ");
     clearBookingSelection();
     setStatus(`${formatDateLabel(selectedBookingDate)} ${groupText} 예약이 확정됐어요.`);
+    await sendBookingPushEvent((data as string[] | null) ?? [], "booking_created");
     setActiveTab("booking");
     await refreshData();
   }
@@ -1764,6 +1778,26 @@ export default function Home() {
 
     await refreshData();
     return result.temporaryPassword;
+  }
+
+  async function sendBookingPushEvent(bookingIds: string[], kind: "booking_created" | "booking_cancelled") {
+    if (bookingIds.length === 0) {
+      return;
+    }
+
+    const token = session?.access_token;
+    if (!token) {
+      return;
+    }
+
+    await fetch("/api/push/booking-event", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ bookingIds, kind }),
+    }).catch(() => undefined);
   }
 
   function getGoalCategoryErrorMessage(error: unknown) {
@@ -1901,6 +1935,7 @@ export default function Home() {
     }
 
     setStatus("예약을 취소했어요.");
+    await sendBookingPushEvent([bookingId], "booking_cancelled");
     await refreshData();
   }
 
@@ -1998,6 +2033,7 @@ export default function Home() {
                 {activeTab === "my" && (
                   <MyPageTab
                     profile={profile}
+                    accessToken={session.access_token}
                     teams={teams}
                     allTeams={allTeams}
                     approvedProfiles={approvedProfiles}
@@ -2844,6 +2880,7 @@ function BookingSlotRow({
 
 function MyPageTab({
   profile,
+  accessToken,
   teams,
   allTeams,
   approvedProfiles,
@@ -2860,6 +2897,7 @@ function MyPageTab({
   resetDateSchedule,
 }: {
   profile: Profile;
+  accessToken: string;
   teams: Team[];
   allTeams: Team[];
   approvedProfiles: Profile[];
@@ -2878,6 +2916,8 @@ function MyPageTab({
   const [scheduleScope, setScheduleScope] = useState<ScheduleScope>("weekly");
   const [scheduleDate, setScheduleDate] = useState(todayISO);
   const [showsLeaderboard, setShowsLeaderboard] = useState(false);
+  const [pushMessage, setPushMessage] = useState("");
+  const [isSavingPush, setIsSavingPush] = useState(false);
   const memberships = teams
     .map((team) => {
       const member = team.members.find((item) => item.id === profile.id);
@@ -2908,6 +2948,59 @@ function MyPageTab({
       ? [{ label: formatDateShort(scheduleDate), day: scheduleDateDay, date: scheduleDate }]
       : dateDayNames.map((day) => ({ label: day, day }));
   const teamListClassName = memberships.length > 4 ? "max-h-56 overflow-y-auto pr-1" : "";
+
+  async function enablePushNotifications() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      setPushMessage("이 브라우저는 웹푸시 알림을 지원하지 않습니다.");
+      return;
+    }
+
+    setIsSavingPush(true);
+    setPushMessage("");
+
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushMessage("알림 권한이 허용되지 않았습니다.");
+        setIsSavingPush(false);
+        return;
+      }
+
+      const publicKeyResponse = await fetch("/api/push/public-key/");
+      const publicKeyResult = (await publicKeyResponse.json().catch(() => null)) as { publicKey?: string; error?: string } | null;
+      if (!publicKeyResponse.ok || !publicKeyResult?.publicKey) {
+        throw new Error(publicKeyResult?.error ?? "푸시 공개키를 불러오지 못했습니다.");
+      }
+
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      const existingSubscription = await registration.pushManager.getSubscription();
+      const subscription =
+        existingSubscription ??
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: base64UrlToBytes(publicKeyResult.publicKey),
+        }));
+      const response = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ subscription: subscription.toJSON() }),
+      });
+      const result = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok) {
+        throw new Error(result?.error ?? "알림 구독 저장에 실패했습니다.");
+      }
+
+      setPushMessage("이 기기에서 합주 알림을 받을 수 있어요.");
+    } catch (error) {
+      setPushMessage(getErrorMessage(error));
+    } finally {
+      setIsSavingPush(false);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -2963,6 +3056,21 @@ function MyPageTab({
             </div>
           </div>
         )}
+      </MobilePanel>
+
+      <MobilePanel title="푸시 알림">
+        <p className="text-xs leading-5 text-slate-500">
+          합주 당일 오전 9시, 시작 30분 전, 일정 추가/취소 알림을 이 기기로 받을 수 있습니다. iPhone은 홈 화면에 추가한 Andante에서 허용해야 안정적으로 동작합니다.
+        </p>
+        {pushMessage && <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{pushMessage}</p>}
+        <button
+          type="button"
+          onClick={enablePushNotifications}
+          disabled={isSavingPush}
+          className="mt-3 h-11 w-full rounded-lg bg-slate-950 text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
+        >
+          {isSavingPush ? "알림 설정 중" : "이 기기에서 알림 받기"}
+        </button>
       </MobilePanel>
 
       <MobilePanel title="소속 팀">
