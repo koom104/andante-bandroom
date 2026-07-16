@@ -2591,6 +2591,20 @@ function BookingTab({
   onUpdateClubRoomStatus: (isOpen: boolean) => Promise<void>;
   onCancelBooking: (bookingId: string, reason: string) => Promise<void>;
 }) {
+  const [pendingCancelBookingId, setPendingCancelBookingId] = useState<string | null>(null);
+  const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
+
+  async function confirmLeaderCancellation(bookingId: string) {
+    setCancellingBookingId(bookingId);
+
+    try {
+      await onCancelBooking(bookingId, "팀장 취소");
+      setPendingCancelBookingId(null);
+    } finally {
+      setCancellingBookingId(null);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <ClubRoomStatusPanel
@@ -2634,23 +2648,50 @@ function BookingTab({
         <MobilePanel title="팀장 예약 관리">
           <div className="space-y-2">
             {leaderReservations.map((reservation) => (
-              <div key={reservation.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0ded7] bg-white p-3">
-                <div>
-                  <p className="text-sm font-semibold">
-                    {reservation.bookingDate ? formatDateLabel(reservation.bookingDate) : `${reservation.day}요일`} {reservation.start}-
-                    {addHours(reservation.start, reservation.duration)}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {reservation.teamName} · {reservation.purpose || reservation.teamSong || "합주"}
-                  </p>
+              <div key={reservation.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {reservation.bookingDate ? formatDateLabel(reservation.bookingDate) : `${reservation.day}요일`} {reservation.start}-
+                      {addHours(reservation.start, reservation.duration)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {reservation.teamName} · {reservation.purpose || reservation.teamSong || "합주"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPendingCancelBookingId(reservation.id)}
+                    disabled={cancellingBookingId !== null}
+                    className="rounded-md bg-[#fff0eb] px-2 py-1 text-xs font-semibold text-[#be3d33] disabled:text-slate-400"
+                  >
+                    취소
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onCancelBooking(reservation.id, "팀장 취소")}
-                  className="rounded-md bg-[#fff0eb] px-2 py-1 text-xs font-semibold text-[#be3d33]"
-                >
-                  취소
-                </button>
+
+                {pendingCancelBookingId === reservation.id && (
+                  <div className="mt-3 border-t border-[#f7e8e2] pt-3">
+                    <p className="text-xs font-semibold text-slate-700">이 예약을 정말 취소할까요?</p>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPendingCancelBookingId(null)}
+                        disabled={cancellingBookingId === reservation.id}
+                        className="h-9 rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-600 disabled:text-slate-400"
+                      >
+                        돌아가기
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void confirmLeaderCancellation(reservation.id)}
+                        disabled={cancellingBookingId === reservation.id}
+                        className="h-9 rounded-lg bg-[#ff665a] text-xs font-semibold text-white disabled:bg-slate-200"
+                      >
+                        {cancellingBookingId === reservation.id ? "취소 중" : "취소"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             {leaderReservations.length === 0 && <EmptyText text="취소할 예약이 없습니다." />}
