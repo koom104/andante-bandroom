@@ -2621,7 +2621,7 @@ function BookingTab({
         </MobilePanel>
       )}
 
-      <ReservationDetailPanel title="금일 예약" date={todayISO()} reservations={reservations} ownTeamIds={ownTeamIds} />
+      <ReservationDetailPanel title={`금일 예약 · ${formatDateLabel(todayISO())}`} date={todayISO()} reservations={reservations} ownTeamIds={ownTeamIds} />
 
       {hasLeaderTeam && (
         <MobilePanel title="팀장 예약 관리">
@@ -4681,7 +4681,6 @@ function ReservationDetailPanel({
               <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4">
                 <span><strong className="text-slate-500">길이</strong> {formatDuration(reservation.duration)}</span>
                 <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>
-                <span><strong className="text-slate-500">날짜</strong> {reservation.bookingDate ? formatDateShort(reservation.bookingDate) : `${reservation.day} 반복`}</span>
               </div>
 
               <div className="mt-1 rounded bg-slate-50 px-2 py-1 text-[10px] leading-4">
