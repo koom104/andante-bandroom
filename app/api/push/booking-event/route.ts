@@ -11,11 +11,28 @@ import {
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_dKyziP5Nq6fTyZWkUd5OQQ_D5oyYD2P";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 type BookingEventBody = {
   bookingIds?: string[];
   kind?: "booking_created" | "booking_cancelled";
+};
+
+type BookingPushTarget = {
+  booking_id: string;
+  team_id: string;
+  booking_date: string | null;
+  day_of_week: string;
+  start_time: string;
+  duration: number;
+  purpose: string;
+  status: string;
+  team_name: string;
+  team_song: string;
+  user_id: string;
+  subscription_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth_key: string;
 };
 
 function webPushConfig() {
@@ -26,11 +43,11 @@ function webPushConfig() {
   };
 }
 
-export async function POST(request: NextRequest) {
-  if (!SUPABASE_SERVICE_ROLE_KEY) {
-    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다." }, { status: 500 });
-  }
+function isMissingPushTargetRpc(error: { code?: string }) {
+  return error.code === "42883" || error.code === "PGRST202";
+}
 
+export async function POST(request: NextRequest) {
   const config = webPushConfig();
   if (!config.publicKey || !config.privateKey) {
     return NextResponse.json({ error: "WEB_PUSH_PUBLIC_KEY 또는 WEB_PUSH_PRIVATE_KEY가 서버 환경변수에 없습니다." }, { status: 500 });
@@ -61,12 +78,6 @@ export async function POST(request: NextRequest) {
       persistSession: false,
     },
   });
-  const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
   const { data: userData, error: userError } = await requesterClient.auth.getUser(token);
   if (userError || !userData.user) {
     return NextResponse.json({ error: "로그인 세션을 확인할 수 없습니다." }, { status: 401 });
@@ -84,90 +95,78 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "승인된 부원만 알림을 보낼 수 있습니다." }, { status: 403 });
   }
 
-  const { data: bookings, error: bookingError } = await serviceClient
-    .from("bookings")
-    .select("id,team_id,booking_date,day_of_week,start_time,duration,purpose,status")
-    .in("id", bookingIds);
-  if (bookingError) {
-    return NextResponse.json({ error: bookingError.message }, { status: 500 });
+  const { data: targets, error: targetError } = await requesterClient.rpc("get_booking_push_targets", {
+    p_booking_ids: bookingIds,
+  });
+  if (targetError) {
+    return NextResponse.json(
+      {
+        error: isMissingPushTargetRpc(targetError)
+          ? "Supabase SQL Editor에서 supabase/patch-020-booking-push-targets.sql을 실행해 주세요."
+          : targetError.message,
+      },
+      { status: 500 },
+    );
   }
 
-  const bookingRows = (bookings ?? []) as PushBooking[];
-  if (bookingRows.length === 0) {
-    return NextResponse.json({ ok: true, sent: 0 });
+  const rows = (targets ?? []) as BookingPushTarget[];
+  const rowsByBooking = new Map<string, BookingPushTarget[]>();
+
+  for (const row of rows) {
+    rowsByBooking.set(row.booking_id, [...(rowsByBooking.get(row.booking_id) ?? []), row]);
   }
 
-  const teamIds = Array.from(new Set(bookingRows.map((booking) => booking.team_id)));
-  const { data: teams } = await serviceClient.from("teams").select("id,name,song").in("id", teamIds);
-  const { data: memberRows } = await serviceClient.from("team_members").select("team_id,user_id").in("team_id", teamIds);
-  const membersByTeam = new Map<string, string[]>();
-
-  for (const member of (memberRows ?? []) as Array<{ team_id: string; user_id: string }>) {
-    membersByTeam.set(member.team_id, [...(membersByTeam.get(member.team_id) ?? []), member.user_id]);
-  }
-
-  const userIds = Array.from(new Set(Array.from(membersByTeam.values()).flat()));
-  if (userIds.length === 0) {
-    return NextResponse.json({ ok: true, sent: 0 });
-  }
-
-  const { data: subscriptions } = await serviceClient
-    .from("push_subscriptions")
-    .select("id,user_id,endpoint,p256dh,auth_key")
-    .is("disabled_at", null)
-    .in("user_id", userIds);
-  const subscriptionsByUser = new Map<string, PushSubscriptionRecord[]>();
-
-  for (const subscription of (subscriptions ?? []) as PushSubscriptionRecord[]) {
-    if (!subscription.user_id) {
-      continue;
-    }
-    subscriptionsByUser.set(subscription.user_id, [...(subscriptionsByUser.get(subscription.user_id) ?? []), subscription]);
-  }
-
-  const teamById = new Map((teams ?? []).map((team) => [(team as PushTeam).id, team as PushTeam]));
   let sent = 0;
   let failed = 0;
-  let recipientCount = 0;
-  let subscriptionCount = 0;
+  const recipientIds = new Set<string>();
+  const subscriptionIds = new Set<string>();
 
-  for (const booking of bookingRows) {
-    const recipients = membersByTeam.get(booking.team_id) ?? [];
-    const payload = buildBookingPushPayload(kind, booking, teamById.get(booking.team_id));
+  for (const [bookingId, bookingRows] of rowsByBooking) {
+    const firstRow = bookingRows[0];
+    const booking: PushBooking = {
+      id: bookingId,
+      team_id: firstRow.team_id,
+      booking_date: firstRow.booking_date,
+      day_of_week: firstRow.day_of_week,
+      start_time: firstRow.start_time,
+      duration: Number(firstRow.duration),
+      purpose: firstRow.purpose,
+      status: firstRow.status,
+    };
+    const team: PushTeam = {
+      id: firstRow.team_id,
+      name: firstRow.team_name,
+      song: firstRow.team_song,
+    };
+    const payload = buildBookingPushPayload(kind, booking, team);
 
-    for (const userId of recipients) {
-      recipientCount += 1;
-      const userSubscriptions = subscriptionsByUser.get(userId) ?? [];
-      subscriptionCount += userSubscriptions.length;
-      let userSent = false;
-
-      for (const subscription of userSubscriptions) {
-        const response = await sendWebPush(subscription, payload, config).catch(() => null);
-        if (response?.status === 404 || response?.status === 410) {
-          await serviceClient.from("push_subscriptions").update({ disabled_at: new Date().toISOString() }).eq("id", subscription.id);
-        }
-        if (response?.ok) {
-          sent += 1;
-          userSent = true;
-        } else {
-          failed += 1;
-        }
+    for (const row of bookingRows) {
+      recipientIds.add(row.user_id);
+      subscriptionIds.add(row.subscription_id);
+      const subscription: PushSubscriptionRecord = {
+        id: row.subscription_id,
+        user_id: row.user_id,
+        endpoint: row.endpoint,
+        p256dh: row.p256dh,
+        auth_key: row.auth_key,
+      };
+      const response = await sendWebPush(subscription, payload, config).catch(() => null);
+      if (response?.status === 404 || response?.status === 410) {
+        await requesterClient.rpc("disable_my_push_subscription", { p_subscription_id: row.subscription_id }).catch(() => undefined);
       }
-
-      if (userSent) {
-        await serviceClient
-          .from("push_notification_logs")
-          .insert({
-            user_id: userId,
-            booking_id: booking.id,
-            kind,
-            notification_date: booking.booking_date,
-          })
-          .throwOnError()
-          .catch(() => undefined);
+      if (response?.ok) {
+        sent += 1;
+      } else {
+        failed += 1;
       }
     }
   }
 
-  return NextResponse.json({ ok: true, sent, failed, recipientCount, subscriptionCount });
+  return NextResponse.json({
+    ok: true,
+    sent,
+    failed,
+    recipientCount: recipientIds.size,
+    subscriptionCount: subscriptionIds.size,
+  });
 }

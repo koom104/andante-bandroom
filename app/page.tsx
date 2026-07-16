@@ -1715,7 +1715,9 @@ export default function Home() {
     clearBookingSelection();
     setStatus(`${formatDateLabel(selectedBookingDate)} ${groupText} 예약이 확정됐어요.`);
     const pushResult = await sendBookingPushEvent(normalizeBookingIds(data), "booking_created");
-    if (pushResult && pushResult.sent === 0) {
+    if (pushResult?.error) {
+      setStatus(`${formatDateLabel(selectedBookingDate)} ${groupText} 예약이 확정됐어요. 알림 오류: ${pushResult.error}`);
+    } else if (pushResult && pushResult.sent === 0) {
       setStatus(`${formatDateLabel(selectedBookingDate)} ${groupText} 예약이 확정됐어요. 알림 받을 기기가 아직 없어요.`);
     }
     setActiveTab("booking");
@@ -1818,11 +1820,15 @@ export default function Home() {
       body: JSON.stringify({ bookingIds, kind }),
     }).catch(() => null);
 
+    const result = (await response?.json().catch(() => null)) as
+      | { sent?: number; failed?: number; recipientCount?: number; subscriptionCount?: number; error?: string }
+      | null;
+
     if (!response?.ok) {
-      return null;
+      return result ?? null;
     }
 
-    return (await response.json().catch(() => null)) as { sent?: number; failed?: number; recipientCount?: number; subscriptionCount?: number } | null;
+    return result;
   }
 
   function getGoalCategoryErrorMessage(error: unknown) {
