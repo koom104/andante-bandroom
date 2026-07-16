@@ -2736,7 +2736,7 @@ function CalendarTab({
                 <span
                   className={`mx-auto flex h-6 min-w-8 max-w-[42px] items-center justify-center rounded-md px-1 text-[10px] font-semibold ${
                     isSelected
-                      ? "border-2 border-[#e7a79c] text-slate-950"
+                      ? "text-slate-950"
                       : isToday
                         ? "bg-slate-950 text-white"
                         : isPast
