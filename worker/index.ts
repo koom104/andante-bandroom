@@ -31,6 +31,11 @@ interface ScheduledEvent {
   scheduledTime: number;
 }
 
+interface PushNotificationLog {
+  user_id: string;
+  booking_id: string | null;
+}
+
 const defaultSupabaseUrl = "https://inlddwyoesmvmxkcuhwd.supabase.co";
 
 function getSupabaseUrl(env: Env) {
@@ -223,12 +228,15 @@ async function sendDailyDigest(env: Env) {
   }
 }
 
-async function sendThirtyMinuteReminders(env: Env) {
+async function sendThirtyMinuteReminders(env: Env, scheduledTime: number) {
   if (!env.SUPABASE_SERVICE_ROLE_KEY || !env.WEB_PUSH_PUBLIC_KEY || !env.WEB_PUSH_PRIVATE_KEY) {
+    console.error("Thirty-minute reminders skipped because required secrets are missing.");
     return;
   }
 
-  const target = kstDateParts(Date.now() + 30 * 60 * 1000);
+  // Cron delivery can be delayed. Use Cloudflare's intended run time so a late
+  // invocation does not move the five-minute booking window forward.
+  const target = kstDateParts(scheduledTime + 30 * 60 * 1000);
   const bookings = (
     await supabaseGet<PushBooking>(
       env,
@@ -239,11 +247,32 @@ async function sendThirtyMinuteReminders(env: Env) {
     return minutes >= target.minutes && minutes < target.minutes + 5;
   });
   const { teamById, membersByTeam, subscriptionsByUser } = await loadPushContext(env, bookings);
+  const bookingIds = bookings.map((booking) => booking.id);
+  const existingLogs =
+    bookingIds.length > 0
+      ? await supabaseGet<PushNotificationLog>(
+          env,
+          `push_notification_logs?select=user_id,booking_id&kind=eq.booking_reminder&booking_id=${inFilter(bookingIds)}`,
+        )
+      : [];
+  const sentKeys = new Set(existingLogs.map((log) => `${log.user_id}:${log.booking_id}`));
+
+  console.log("Thirty-minute reminder candidates", {
+    scheduledTime: new Date(scheduledTime).toISOString(),
+    targetDate: target.date,
+    targetMinutes: target.minutes,
+    bookingCount: bookings.length,
+  });
 
   for (const booking of bookings) {
     const payload = buildBookingPushPayload("booking_reminder", booking, teamById.get(booking.team_id));
 
     for (const userId of membersByTeam.get(booking.team_id) ?? []) {
+      const sentKey = `${userId}:${booking.id}`;
+      if (sentKeys.has(sentKey)) {
+        continue;
+      }
+
       const userSubscriptions = subscriptionsByUser.get(userId) ?? [];
       if (userSubscriptions.length === 0) {
         continue;
@@ -256,12 +285,16 @@ async function sendThirtyMinuteReminders(env: Env) {
       }
 
       if (userSent) {
-        await supabaseInsertLog(env, {
+        const logged = await supabaseInsertLog(env, {
           user_id: userId,
           booking_id: booking.id,
           kind: "booking_reminder",
           notification_date: booking.booking_date,
         });
+
+        if (logged) {
+          sentKeys.add(sentKey);
+        }
       }
     }
   }
@@ -296,7 +329,12 @@ const worker = {
       return;
     }
 
-    ctx.waitUntil(sendThirtyMinuteReminders(env));
+    ctx.waitUntil(
+      sendThirtyMinuteReminders(env, event.scheduledTime).catch((error) => {
+        console.error("Thirty-minute reminder job failed", error);
+        throw error;
+      }),
+    );
   },
 };
 

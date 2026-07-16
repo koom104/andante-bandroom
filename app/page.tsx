@@ -2607,11 +2607,11 @@ function BookingTab({
                         {reservation.teamName} - {reservation.purpose || reservation.teamSong || "합주"}
                       </p>
                     </div>
-                    <p className="shrink-0 rounded bg-slate-950 px-2 py-1 text-right text-[10px] font-semibold leading-4 text-white">
-                      {reservation.start}
-                      <br />
-                      {addHours(reservation.start, reservation.duration)}
-                    </p>
+                    <div className="flex shrink-0 items-center rounded bg-slate-950 px-2 py-1.5 text-right text-white">
+                      <p className="text-[11px] font-semibold leading-4">
+                        {reservation.start}-{addHours(reservation.start, reservation.duration)}
+                      </p>
+                    </div>
                   </div>
                 </div>
               );
