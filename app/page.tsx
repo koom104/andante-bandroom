@@ -4670,23 +4670,23 @@ function ReservationDetailPanel({
                     대표자 {reservation.leaderName}
                     {reservation.leaderRole ? ` · ${reservation.leaderRole}` : ""}
                   </p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4">
+                    <span><strong className="text-slate-500">길이</strong> {formatDuration(reservation.duration)}</span>
+                    <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>
+                  </div>
                 </div>
-                <div className="flex max-w-[46%] shrink-0 flex-col items-end gap-0.5">
-                  <div className="flex items-center rounded bg-slate-950 px-2 py-1.5 text-right text-white">
+                <div className="flex w-[92px] shrink-0 flex-col items-center gap-0.5">
+                  <div className="flex w-full items-center justify-center rounded bg-slate-950 px-2 py-1.5 text-center text-white">
                     <p className="text-[11px] font-semibold leading-4">
                       {reservation.start}-{addHours(reservation.start, reservation.duration)}
                     </p>
                   </div>
-                  <p className="max-w-full truncate text-[10px] leading-4 text-slate-500">
-                    목적 {reservation.purpose || reservation.teamSong || "합주 예약"}
+                  <p className="w-full truncate text-center text-[10px] leading-4 text-slate-500">
+                    {reservation.purpose || reservation.teamSong || "합주 예약"}
                   </p>
                 </div>
               </div>
 
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4">
-                <span><strong className="text-slate-500">길이</strong> {formatDuration(reservation.duration)}</span>
-                <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>
-              </div>
             </article>
           );
         })}
