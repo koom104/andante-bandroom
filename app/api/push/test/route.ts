@@ -15,6 +15,10 @@ function webPushConfig() {
   };
 }
 
+function isMissingPushSchema(error: { code?: string; message?: string }) {
+  return error.code === "42P01" || error.code === "PGRST204" || error.code === "PGRST205";
+}
+
 export async function POST(request: NextRequest) {
   if (!SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다." }, { status: 500 });
@@ -73,7 +77,7 @@ export async function POST(request: NextRequest) {
   if (subscriptionError) {
     return NextResponse.json(
       {
-        error: subscriptionError.message.includes("push_subscriptions")
+        error: isMissingPushSchema(subscriptionError)
           ? "Supabase SQL Editor에서 supabase/patch-018-web-push.sql을 먼저 실행해 주세요."
           : subscriptionError.message,
       },
