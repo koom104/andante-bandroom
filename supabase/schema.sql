@@ -109,6 +109,13 @@ create table if not exists public.booking_attendance (
   primary key (booking_id, user_id)
 );
 
+create table if not exists public.booking_roster (
+  booking_id uuid not null references public.bookings(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (booking_id, user_id)
+);
+
 create table if not exists public.push_subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -782,10 +789,12 @@ as $$
     coalesce((
       select sum(b.duration)
       from public.bookings b
-      join public.booking_attendance ba on ba.booking_id = b.id
       where b.team_id = t.id
         and b.status = 'confirmed'
         and b.booking_date < current_date
+        and (select count(*) from public.booking_roster br where br.booking_id = b.id) > 0
+        and (select count(*) from public.booking_roster br where br.booking_id = b.id)
+          = (select count(*) from public.booking_attendance ba where ba.booking_id = b.id)
     ), 0)::numeric as total_session_duration
   from public.teams t
   order by total_duration desc, t.name asc;
@@ -1031,10 +1040,36 @@ begin
 end;
 $$;
 
+create or replace function public.snapshot_booking_roster()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status <> 'confirmed' then
+    return new;
+  end if;
+
+  insert into public.booking_roster (booking_id, user_id)
+  select new.id, team_members.user_id
+  from public.team_members
+  where team_members.team_id = new.team_id
+  on conflict (booking_id, user_id) do nothing;
+
+  return new;
+end;
+$$;
+
 drop trigger if exists bookings_snapshot_attendance on public.bookings;
 create trigger bookings_snapshot_attendance
 after insert on public.bookings
 for each row execute function public.snapshot_booking_attendance();
+
+drop trigger if exists bookings_snapshot_roster on public.bookings;
+create trigger bookings_snapshot_roster
+after insert on public.bookings
+for each row execute function public.snapshot_booking_roster();
 
 create or replace function public.cancel_booking(
   p_booking_id uuid,
@@ -1093,6 +1128,7 @@ alter table public.member_schedules enable row level security;
 alter table public.member_schedule_date_slots enable row level security;
 alter table public.bookings enable row level security;
 alter table public.booking_attendance enable row level security;
+alter table public.booking_roster enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.push_notification_logs enable row level security;
 alter table public.audit_logs enable row level security;
@@ -1301,6 +1337,20 @@ for insert
 to authenticated
 with check (public.is_admin(auth.uid()));
 
+drop policy if exists "booking_roster_select" on public.booking_roster;
+create policy "booking_roster_select"
+on public.booking_roster
+for select
+to authenticated
+using (public.is_approved(auth.uid()));
+
+drop policy if exists "booking_roster_admin_insert" on public.booking_roster;
+create policy "booking_roster_admin_insert"
+on public.booking_roster
+for insert
+to authenticated
+with check (public.is_admin(auth.uid()));
+
 drop policy if exists "push_subscriptions_select_self" on public.push_subscriptions;
 create policy "push_subscriptions_select_self"
 on public.push_subscriptions
@@ -1370,6 +1420,7 @@ grant execute on function public.cancel_booking(uuid, text) to authenticated;
 grant select, insert, update, delete on public.member_schedules to authenticated;
 grant select, insert, update, delete on public.member_schedule_date_slots to authenticated;
 grant select, insert on public.booking_attendance to authenticated;
+grant select, insert on public.booking_roster to authenticated;
 grant select, insert, update, delete on public.push_subscriptions to authenticated;
 grant select on public.push_notification_logs to authenticated;
 grant select, insert, delete on public.rehearsal_goal_categories to authenticated;
@@ -1397,6 +1448,13 @@ where bookings.status = 'confirmed'
     bookings.start_time,
     bookings.duration
   )
+on conflict (booking_id, user_id) do nothing;
+
+insert into public.booking_roster (booking_id, user_id)
+select bookings.id, team_members.user_id
+from public.bookings
+join public.team_members on team_members.team_id = bookings.team_id
+where bookings.status = 'confirmed'
 on conflict (booking_id, user_id) do nothing;
 
 insert into public.profiles (
