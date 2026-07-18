@@ -135,6 +135,11 @@ type RehearsalRankRow = {
   rank: number;
 };
 
+type TeamRehearsalTotal = {
+  totalDuration: number;
+  totalSessionDuration: number;
+};
+
 const days: Day[] = ["월", "화", "수", "목", "금", "토", "일"];
 const dateDayNames: Day[] = ["일", "월", "화", "수", "목", "금", "토"];
 const sessionOptions: SessionRole[] = ["보컬", "리드기타", "리듬기타", "어쿠스틱", "베이스", "드럼", "피아노", "신디"];
@@ -766,7 +771,7 @@ export default function Home() {
   const [rehearsalByUser, setRehearsalByUser] = useState<Record<string, string[]>>({});
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rehearsalLeaderboardRows, setRehearsalLeaderboardRows] = useState<RehearsalRankRow[]>([]);
-  const [teamRehearsalTotals, setTeamRehearsalTotals] = useState<Record<string, number>>({});
+  const [teamRehearsalTotals, setTeamRehearsalTotals] = useState<Record<string, TeamRehearsalTotal>>({});
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedBookingDate, setSelectedBookingDate] = useState(todayISO);
   const [bookingSelection, setBookingSelection] = useState<{ teamId: string; date: string; times: string[] }>({
@@ -1078,8 +1083,18 @@ export default function Home() {
     const nextTeamRehearsalTotals = Object.fromEntries(
       (teamRehearsalTotalsError
         ? []
-        : ((teamRehearsalTotalsResult.data ?? []) as Array<{ team_id: string; total_duration: number }>))
-        .map((row) => [row.team_id, Number(row.total_duration) || 0]),
+        : ((teamRehearsalTotalsResult.data ?? []) as Array<{
+            team_id: string;
+            total_duration: number;
+            total_session_duration: number;
+          }>))
+        .map((row) => [
+          row.team_id,
+          {
+            totalDuration: Number(row.total_duration) || 0,
+            totalSessionDuration: Number(row.total_session_duration) || 0,
+          },
+        ]),
     );
     const rehearsalMap: Record<string, string[]> = {};
     for (const booking of nextReservations) {
@@ -3358,7 +3373,7 @@ function TeamTab({
   allTeams: Team[];
   approvedProfiles: Profile[];
   goalCategories: GoalCategory[];
-  teamRehearsalTotals: Record<string, number>;
+  teamRehearsalTotals: Record<string, TeamRehearsalTotal>;
   onAddTeam: (payload: NewTeamPayload) => Promise<void>;
   onUpdateTeam: (payload: UpdateTeamPayload) => Promise<void>;
   currentUserId: string;
@@ -3646,7 +3661,7 @@ function TeamTab({
           <div className="space-y-2">
             {registeredGoalTeams.map((team) => {
               const leaderProfile = team.members.find((member) => member.id === team.leaderId);
-              const totalRehearsalTime = teamRehearsalTotals[team.id] ?? 0;
+              const rehearsalTotals = teamRehearsalTotals[team.id] ?? { totalDuration: 0, totalSessionDuration: 0 };
 
               return (
                 <div key={team.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
@@ -3655,10 +3670,16 @@ function TeamTab({
                       <p className="text-sm font-semibold">{team.name}</p>
                       <p className="mt-1 text-xs text-slate-500">{team.song}</p>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <span className={`ml-auto block h-3 w-3 rounded-sm ${team.color}`} />
-                      <p className="mt-2 text-[11px] font-semibold text-slate-500">총 합주시간</p>
-                      <p className="mt-0.5 text-sm font-semibold text-slate-950">{formatDuration(totalRehearsalTime)}</p>
+                    <div className="relative min-w-[138px] shrink-0 pt-4 text-right">
+                      <span className={`absolute right-0 top-0 block h-3 w-3 rounded-sm ${team.color}`} />
+                      <p className="flex items-center justify-between gap-2 whitespace-nowrap text-[10px] font-semibold leading-4 text-slate-500">
+                        <span>전체 합주시간</span>
+                        <strong className="text-xs text-slate-950">{formatDuration(rehearsalTotals.totalDuration)}</strong>
+                      </p>
+                      <p className="flex items-center justify-between gap-2 whitespace-nowrap text-[10px] font-semibold leading-4 text-slate-500">
+                        <span>전체 세션 합주시간</span>
+                        <strong className="text-xs text-slate-950">{formatDuration(rehearsalTotals.totalSessionDuration)}</strong>
+                      </p>
                     </div>
                   </div>
                   <p className="mt-2 text-xs font-semibold text-[#be3d33]">

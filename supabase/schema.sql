@@ -757,10 +757,13 @@ as $$
   order by rank asc, member_totals.cohort asc, member_totals.name asc;
 $$;
 
-create or replace function public.get_team_rehearsal_totals()
+drop function if exists public.get_team_rehearsal_totals();
+
+create function public.get_team_rehearsal_totals()
 returns table (
   team_id uuid,
-  total_duration numeric
+  total_duration numeric,
+  total_session_duration numeric
 )
 language sql
 stable
@@ -769,13 +772,22 @@ set search_path = public
 as $$
   select
     t.id as team_id,
-    coalesce(sum(b.duration), 0)::numeric as total_duration
+    coalesce((
+      select sum(b.duration)
+      from public.bookings b
+      where b.team_id = t.id
+        and b.status = 'confirmed'
+        and b.booking_date < current_date
+    ), 0)::numeric as total_duration,
+    coalesce((
+      select sum(b.duration)
+      from public.bookings b
+      join public.booking_attendance ba on ba.booking_id = b.id
+      where b.team_id = t.id
+        and b.status = 'confirmed'
+        and b.booking_date < current_date
+    ), 0)::numeric as total_session_duration
   from public.teams t
-  left join public.bookings b
-    on b.team_id = t.id
-    and b.status = 'confirmed'
-    and b.booking_date < current_date
-  group by t.id
   order by total_duration desc, t.name asc;
 $$;
 
