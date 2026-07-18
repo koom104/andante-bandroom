@@ -116,6 +116,14 @@ create table if not exists public.booking_roster (
   primary key (booking_id, user_id)
 );
 
+create table if not exists public.booking_attendance_slots (
+  booking_id uuid not null references public.bookings(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  start_time text not null,
+  created_at timestamptz not null default now(),
+  primary key (booking_id, user_id, start_time)
+);
+
 create table if not exists public.push_subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -740,12 +748,12 @@ as $$
       p.id as user_id,
       p.name,
       p.cohort,
-      coalesce(sum(b.duration), 0)::numeric as total_duration
+      (count(b.id) * 0.5)::numeric as total_duration
     from public.profiles p
-    left join public.booking_attendance ba
-      on ba.user_id = p.id
+    left join public.booking_attendance_slots bas
+      on bas.user_id = p.id
     left join public.bookings b
-      on b.id = ba.booking_id
+      on b.id = bas.booking_id
       and b.status = 'confirmed'
       and b.booking_date < current_date
     where p.role <> 'admin'
@@ -787,14 +795,22 @@ as $$
         and b.booking_date < current_date
     ), 0)::numeric as total_duration,
     coalesce((
-      select sum(b.duration)
-      from public.bookings b
-      where b.team_id = t.id
-        and b.status = 'confirmed'
-        and b.booking_date < current_date
-        and (select count(*) from public.booking_roster br where br.booking_id = b.id) > 0
-        and (select count(*) from public.booking_roster br where br.booking_id = b.id)
-          = (select count(*) from public.booking_attendance ba where ba.booking_id = b.id)
+      select count(*) * 0.5
+      from (
+        select bas.booking_id, bas.start_time
+        from public.booking_attendance_slots bas
+        join public.bookings b on b.id = bas.booking_id
+        where b.team_id = t.id
+          and b.status = 'confirmed'
+          and b.booking_date < current_date
+        group by bas.booking_id, bas.start_time
+        having count(*) = (
+          select count(*)
+          from public.booking_roster br
+          where br.booking_id = bas.booking_id
+        )
+        and count(*) > 0
+      ) full_team_slots
     ), 0)::numeric as total_session_duration
   from public.teams t
   order by total_duration desc, t.name asc;
@@ -1057,6 +1073,30 @@ begin
   where team_members.team_id = new.team_id
   on conflict (booking_id, user_id) do nothing;
 
+  insert into public.booking_attendance_slots (booking_id, user_id, start_time)
+  select new.id, team_members.user_id, slot.slot_time
+  from public.team_members
+  cross join generate_series(0, (new.duration * 2)::integer - 1) as slot_index
+  cross join lateral (
+    select
+      lpad(((split_part(new.start_time, ':', 1)::integer * 60
+        + split_part(new.start_time, ':', 2)::integer
+        + slot_index * 30) / 60)::integer::text, 2, '0')
+      || ':' ||
+      lpad(((split_part(new.start_time, ':', 1)::integer * 60
+        + split_part(new.start_time, ':', 2)::integer
+        + slot_index * 30) % 60)::integer::text, 2, '0') as slot_time
+  ) slot
+  where team_members.team_id = new.team_id
+    and public.is_member_available_for_booking(
+      team_members.user_id,
+      new.booking_date,
+      new.day_of_week,
+      slot.slot_time,
+      0.5
+    )
+  on conflict (booking_id, user_id, start_time) do nothing;
+
   return new;
 end;
 $$;
@@ -1129,6 +1169,7 @@ alter table public.member_schedule_date_slots enable row level security;
 alter table public.bookings enable row level security;
 alter table public.booking_attendance enable row level security;
 alter table public.booking_roster enable row level security;
+alter table public.booking_attendance_slots enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.push_notification_logs enable row level security;
 alter table public.audit_logs enable row level security;
@@ -1351,6 +1392,20 @@ for insert
 to authenticated
 with check (public.is_admin(auth.uid()));
 
+drop policy if exists "booking_attendance_slots_select" on public.booking_attendance_slots;
+create policy "booking_attendance_slots_select"
+on public.booking_attendance_slots
+for select
+to authenticated
+using (public.is_approved(auth.uid()));
+
+drop policy if exists "booking_attendance_slots_admin_insert" on public.booking_attendance_slots;
+create policy "booking_attendance_slots_admin_insert"
+on public.booking_attendance_slots
+for insert
+to authenticated
+with check (public.is_admin(auth.uid()));
+
 drop policy if exists "push_subscriptions_select_self" on public.push_subscriptions;
 create policy "push_subscriptions_select_self"
 on public.push_subscriptions
@@ -1421,6 +1476,7 @@ grant select, insert, update, delete on public.member_schedules to authenticated
 grant select, insert, update, delete on public.member_schedule_date_slots to authenticated;
 grant select, insert on public.booking_attendance to authenticated;
 grant select, insert on public.booking_roster to authenticated;
+grant select, insert on public.booking_attendance_slots to authenticated;
 grant select, insert, update, delete on public.push_subscriptions to authenticated;
 grant select on public.push_notification_logs to authenticated;
 grant select, insert, delete on public.rehearsal_goal_categories to authenticated;
@@ -1456,6 +1512,23 @@ from public.bookings
 join public.team_members on team_members.team_id = bookings.team_id
 where bookings.status = 'confirmed'
 on conflict (booking_id, user_id) do nothing;
+
+insert into public.booking_attendance_slots (booking_id, user_id, start_time)
+select booking_attendance.booking_id, booking_attendance.user_id, slot.slot_time
+from public.booking_attendance
+join public.bookings on bookings.id = booking_attendance.booking_id
+cross join generate_series(0, (bookings.duration * 2)::integer - 1) as slot_index
+cross join lateral (
+  select
+    lpad(((split_part(bookings.start_time, ':', 1)::integer * 60
+      + split_part(bookings.start_time, ':', 2)::integer
+      + slot_index * 30) / 60)::integer::text, 2, '0')
+    || ':' ||
+    lpad(((split_part(bookings.start_time, ':', 1)::integer * 60
+      + split_part(bookings.start_time, ':', 2)::integer
+      + slot_index * 30) % 60)::integer::text, 2, '0') as slot_time
+) slot
+on conflict (booking_id, user_id, start_time) do nothing;
 
 insert into public.profiles (
   id,
