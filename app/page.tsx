@@ -1816,6 +1816,22 @@ export default function Home() {
     return result.temporaryPassword;
   }
 
+  async function resetRehearsalTracking() {
+    if (!isSuperAdmin(profile)) {
+      throw new Error("최고 관리자만 합주시간을 초기화할 수 있습니다.");
+    }
+
+    const { data, error } = await supabase.rpc("reset_rehearsal_tracking");
+
+    if (error) {
+      throw new Error(getErrorMessage(error));
+    }
+
+    setStatus("합주시간을 초기화했어요. 내일 이후 합주부터 다시 누적됩니다.");
+    await refreshData();
+    return data as string;
+  }
+
   async function sendBookingPushEvent(bookingIds: string[], kind: "booking_created" | "booking_cancelled") {
     if (bookingIds.length === 0) {
       return null;
@@ -2127,6 +2143,7 @@ export default function Home() {
                     approveProfile={approveProfile}
                     updateProfileRole={updateProfileRole}
                     resetMemberPassword={resetMemberPassword}
+                    resetRehearsalTracking={resetRehearsalTracking}
                     addGoalCategory={addGoalCategory}
                     deleteGoalCategory={deleteGoalCategory}
                     addTeam={addTeam}
@@ -3984,6 +4001,7 @@ function AdminTab({
   approveProfile,
   updateProfileRole,
   resetMemberPassword,
+  resetRehearsalTracking,
   addGoalCategory,
   deleteGoalCategory,
   addTeam,
@@ -4006,6 +4024,7 @@ function AdminTab({
   approveProfile: (profileId: string, nextStatus: "approved" | "rejected") => Promise<void>;
   updateProfileRole: (profileId: string, nextRole: "member" | "manager") => Promise<void>;
   resetMemberPassword: (profileId: string) => Promise<string>;
+  resetRehearsalTracking: () => Promise<string>;
   addGoalCategory: (name: string) => Promise<void>;
   deleteGoalCategory: (categoryId: string) => Promise<void>;
   addTeam: (payload: NewTeamPayload) => Promise<void>;
@@ -4018,6 +4037,9 @@ function AdminTab({
   const [newGoalName, setNewGoalName] = useState("");
   const [managerTargetId, setManagerTargetId] = useState("");
   const [managerQuery, setManagerQuery] = useState("");
+  const [showsRehearsalResetConfirmation, setShowsRehearsalResetConfirmation] = useState(false);
+  const [isResettingRehearsalTracking, setIsResettingRehearsalTracking] = useState(false);
+  const [rehearsalResetMessage, setRehearsalResetMessage] = useState("");
   const roleEditableProfiles = approvedProfiles.filter((profile) => profile.role !== "admin");
   const selectedRoleProfile = roleEditableProfiles.find((profile) => profile.id === managerTargetId) ?? null;
 
@@ -4031,6 +4053,21 @@ function AdminTab({
     setNewGoalName("");
   }
 
+  async function confirmRehearsalTrackingReset() {
+    setIsResettingRehearsalTracking(true);
+    setRehearsalResetMessage("");
+
+    try {
+      await resetRehearsalTracking();
+      setShowsRehearsalResetConfirmation(false);
+      setRehearsalResetMessage("초기화가 완료되었습니다. 내일 이후 합주부터 다시 누적됩니다.");
+    } catch (error) {
+      setRehearsalResetMessage(getErrorMessage(error));
+    } finally {
+      setIsResettingRehearsalTracking(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <MobilePanel>
@@ -4042,8 +4079,9 @@ function AdminTab({
       </MobilePanel>
 
       {isSuperAdmin(currentProfile) && (
-        <MobilePanel title="집기 권한 관리">
-          <div className="space-y-3">
+        <>
+          <MobilePanel title="집기 권한 관리">
+            <div className="space-y-3">
             <ProfileSearchPicker
               label="부원 검색"
               value={managerTargetId}
@@ -4077,8 +4115,52 @@ function AdminTab({
                 집기 해제
               </button>
             </div>
-          </div>
-        </MobilePanel>
+            </div>
+          </MobilePanel>
+
+          <MobilePanel title="합주시간 초기화">
+            <p className="text-xs leading-5 text-slate-600">
+              예약과 시간표는 유지하고, 오늘까지의 개인·팀 합주시간과 순위만 집계에서 제외합니다.
+            </p>
+            {rehearsalResetMessage && (
+              <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{rehearsalResetMessage}</p>
+            )}
+            {!showsRehearsalResetConfirmation ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setRehearsalResetMessage("");
+                  setShowsRehearsalResetConfirmation(true);
+                }}
+                className="mt-3 h-10 w-full rounded-lg border border-[#ff665a] bg-white text-sm font-semibold text-[#be3d33]"
+              >
+                합주시간 초기화
+              </button>
+            ) : (
+              <div className="mt-3 rounded-lg bg-[#fff0eb] p-3">
+                <p className="text-xs font-semibold leading-5 text-[#9f3029]">정말 초기화할까요? 실행 후 이전 누적시간은 화면에 다시 표시되지 않습니다.</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowsRehearsalResetConfirmation(false)}
+                    disabled={isResettingRehearsalTracking}
+                    className="h-9 rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-600 disabled:text-slate-300"
+                  >
+                    돌아가기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmRehearsalTrackingReset()}
+                    disabled={isResettingRehearsalTracking}
+                    className="h-9 rounded-lg bg-[#ff665a] text-xs font-semibold text-white disabled:bg-slate-200"
+                  >
+                    {isResettingRehearsalTracking ? "초기화 중" : "초기화 확정"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </MobilePanel>
+        </>
       )}
 
       <MobilePanel title="가입 승인">

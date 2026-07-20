@@ -155,6 +155,13 @@ create table if not exists public.audit_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.rehearsal_tracking_settings (
+  id integer primary key default 1 check (id = 1),
+  count_from_date date not null default date '1970-01-01',
+  updated_by uuid references public.profiles(id),
+  updated_at timestamptz not null default now()
+);
+
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
@@ -756,6 +763,10 @@ as $$
       on b.id = bas.booking_id
       and b.status = 'confirmed'
       and b.booking_date < current_date
+      and b.booking_date >= coalesce(
+        (select count_from_date from public.rehearsal_tracking_settings where id = 1),
+        date '1970-01-01'
+      )
     where p.role <> 'admin'
       and p.status = 'approved'
     group by p.id, p.name, p.cohort
@@ -793,6 +804,10 @@ as $$
       where b.team_id = t.id
         and b.status = 'confirmed'
         and b.booking_date < current_date
+        and b.booking_date >= coalesce(
+          (select count_from_date from public.rehearsal_tracking_settings where id = 1),
+          date '1970-01-01'
+        )
     ), 0)::numeric as total_duration,
     coalesce((
       select count(*) * 0.5
@@ -803,6 +818,10 @@ as $$
         where b.team_id = t.id
           and b.status = 'confirmed'
           and b.booking_date < current_date
+          and b.booking_date >= coalesce(
+            (select count_from_date from public.rehearsal_tracking_settings where id = 1),
+            date '1970-01-01'
+          )
         group by bas.booking_id, bas.start_time
         having count(*) = (
           select count(*)
@@ -814,6 +833,33 @@ as $$
     ), 0)::numeric as total_session_duration
   from public.teams t
   order by total_duration desc, t.name asc;
+$$;
+
+create or replace function public.reset_rehearsal_tracking()
+returns date
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  next_count_from_date date := current_date + 1;
+begin
+  if not public.is_super_admin(auth.uid()) then
+    raise exception '최고 관리자만 합주시간을 초기화할 수 있습니다.';
+  end if;
+
+  insert into public.rehearsal_tracking_settings (id, count_from_date, updated_by, updated_at)
+  values (1, next_count_from_date, auth.uid(), now())
+  on conflict (id) do update
+  set count_from_date = excluded.count_from_date,
+      updated_by = excluded.updated_by,
+      updated_at = excluded.updated_at;
+
+  insert into public.audit_logs (actor_id, action, target_type, reason)
+  values (auth.uid(), 'reset_rehearsal_tracking', 'rehearsal_tracking', '합주시간 누적 기준 초기화');
+
+  return next_count_from_date;
+end;
 $$;
 
 create or replace function public.create_booking(
@@ -1173,6 +1219,7 @@ alter table public.booking_attendance_slots enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.push_notification_logs enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.rehearsal_tracking_settings enable row level security;
 
 create unique index if not exists push_notification_logs_booking_once
 on public.push_notification_logs (user_id, booking_id, kind)
@@ -1463,6 +1510,7 @@ grant execute on function public.complete_password_reset() to authenticated;
 grant execute on function public.save_member_weekly_schedule(uuid, jsonb) to authenticated;
 grant execute on function public.get_rehearsal_leaderboard() to authenticated;
 grant execute on function public.get_team_rehearsal_totals() to authenticated;
+grant execute on function public.reset_rehearsal_tracking() to authenticated;
 grant execute on function public.is_admin(uuid) to authenticated;
 grant execute on function public.is_super_admin(uuid) to authenticated;
 grant execute on function public.save_push_subscription(text, text, text, text) to authenticated;
@@ -1490,6 +1538,10 @@ on conflict (name) do nothing;
 
 insert into public.club_room_status (id, is_open)
 values (1, false)
+on conflict (id) do nothing;
+
+insert into public.rehearsal_tracking_settings (id, count_from_date)
+values (1, date '1970-01-01')
 on conflict (id) do nothing;
 
 insert into public.booking_attendance (booking_id, user_id)
