@@ -18,6 +18,8 @@ function isMissingPushSchema(error: { code?: string; message?: string }) {
   return error.code === "42P01" || error.code === "PGRST202" || error.code === "PGRST204" || error.code === "PGRST205";
 }
 
+type TestPushKind = "daily_digest" | "booking_reminder";
+
 export async function POST(request: NextRequest) {
   const config = webPushConfig();
   if (!config.publicKey || !config.privateKey) {
@@ -29,6 +31,9 @@ export async function POST(request: NextRequest) {
   if (!token) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
+
+  const requestBody = (await request.json().catch(() => null)) as { kind?: TestPushKind } | null;
+  const kind: TestPushKind = requestBody?.kind === "daily_digest" ? "daily_digest" : "booking_reminder";
 
   const requesterClient = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     global: {
@@ -76,17 +81,23 @@ export async function POST(request: NextRequest) {
   }
 
   let sent = 0;
+  const payload =
+    kind === "daily_digest"
+      ? {
+          title: "오늘 합주 일정",
+          body: "[테스트] 2건: 14:00 가상 합주 A, 18:00 가상 합주 B",
+          url: "/",
+          tag: `push-test-digest-${userData.user.id}-${Date.now()}`,
+        }
+      : {
+          title: "합주 시작 30분 전입니다",
+          body: "[테스트] 18:00-20:00 · 가상 합주 팀 - 알림 확인",
+          url: "/",
+          tag: `push-test-reminder-${userData.user.id}-${Date.now()}`,
+        };
+
   for (const subscription of activeSubscriptions) {
-    const response = await sendWebPush(
-      subscription,
-      {
-        title: "Andante 테스트 알림",
-        body: `${profile.name}님, 웹푸시 알림이 정상 연결됐어요.`,
-        url: "/",
-        tag: `push-test-${userData.user.id}`,
-      },
-      config,
-    ).catch(() => null);
+    const response = await sendWebPush(subscription, payload, config).catch(() => null);
 
     if (response?.status === 404 || response?.status === 410) {
       await requesterClient.rpc("disable_my_push_subscription", { p_subscription_id: subscription.id });
@@ -101,5 +112,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "알림 발송에 실패했습니다. 브라우저 알림 권한을 다시 확인해 주세요." }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, sent });
+  return NextResponse.json({ ok: true, sent, kind, recipient: profile.name });
 }

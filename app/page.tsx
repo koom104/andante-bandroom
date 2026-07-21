@@ -3217,7 +3217,7 @@ function MyPageTab({
     }
   }
 
-  async function sendTestPushNotification() {
+  async function sendTestPushNotification(kind: "daily_digest" | "booking_reminder") {
     setIsSendingTestPush(true);
     setPushMessage("");
 
@@ -3228,7 +3228,7 @@ function MyPageTab({
           "content-type": "application/json",
           authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ kind }),
       });
       const result = (await response.json().catch(() => null)) as { sent?: number; error?: string } | null;
 
@@ -3236,7 +3236,7 @@ function MyPageTab({
         throw new Error(result?.error ?? "테스트 알림 발송에 실패했습니다.");
       }
 
-      setPushMessage(`테스트 알림을 보냈어요. (${result?.sent ?? 1}개 기기)`);
+      setPushMessage(`${kind === "daily_digest" ? "아침 브리핑" : "30분 전"} 테스트 알림을 보냈어요. (${result?.sent ?? 1}개 기기)`);
     } catch (error) {
       setPushMessage(getErrorMessage(error));
     } finally {
@@ -3365,14 +3365,24 @@ function MyPageTab({
         >
           {isSavingPush ? "알림 설정 중" : "이 기기에서 알림 받기"}
         </button>
-        <button
-          type="button"
-          onClick={sendTestPushNotification}
-          disabled={isSendingTestPush}
-          className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
-        >
-          {isSendingTestPush ? "테스트 발송 중" : "테스트 알림 보내기"}
-        </button>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => sendTestPushNotification("daily_digest")}
+            disabled={isSendingTestPush}
+            className="h-10 rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            아침 브리핑 테스트
+          </button>
+          <button
+            type="button"
+            onClick={() => sendTestPushNotification("booking_reminder")}
+            disabled={isSendingTestPush}
+            className="h-10 rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            30분 전 알림 테스트
+          </button>
+        </div>
       </MobilePanel>
     </div>
   );
