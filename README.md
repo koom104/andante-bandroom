@@ -106,9 +106,10 @@ Wrangler 로그인이 필요합니다.
 
 ```bash
 pnpm exec wrangler login
-pnpm build
-pnpm exec wrangler deploy --config dist/server/wrangler.json --name bandroom-ai --keep-vars
+pnpm run deploy:cloudflare
 ```
+
+이 명령은 앱 배포 후 오전 9시 브리핑(`0 0 * * *`, UTC)과 5분 간격 예약 알림 Cron을 함께 다시 연결합니다.
 
 Cloudflare 환경변수에는 다음 값을 설정합니다.
 

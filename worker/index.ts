@@ -196,17 +196,28 @@ async function sendToSubscription(env: Env, subscription: PushSubscriptionRecord
 }
 
 async function sendDailyDigest(env: Env) {
+  const runTime = Date.now();
+  console.log("Daily digest job started", {
+    runTime: new Date(runTime).toISOString(),
+  });
+
   if (!env.SUPABASE_SERVICE_ROLE_KEY || !env.WEB_PUSH_PUBLIC_KEY || !env.WEB_PUSH_PRIVATE_KEY) {
+    console.error("Daily digest skipped because required secrets are missing.");
     return;
   }
 
-  const today = kstDateParts().date;
+  const today = kstDateParts(runTime).date;
   const bookings = await supabaseGet<PushBooking>(
     env,
     `bookings?select=id,team_id,booking_date,day_of_week,start_time,duration,purpose,status&status=eq.confirmed&booking_date=eq.${today}&order=start_time.asc`,
   );
   const { teamById, membersByTeam, subscriptionsByUser } = await loadPushContext(env, bookings);
   const bookingsByUser = new Map<string, PushBooking[]>();
+
+  console.log("Daily digest candidates", {
+    targetDate: today,
+    bookingCount: bookings.length,
+  });
 
   for (const booking of bookings) {
     for (const userId of membersByTeam.get(booking.team_id) ?? []) {
@@ -357,7 +368,12 @@ const worker = {
   },
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     if (event.cron === "0 0 * * *") {
-      ctx.waitUntil(sendDailyDigest(env));
+      ctx.waitUntil(
+        sendDailyDigest(env).catch((error) => {
+          console.error("Daily digest job failed", error);
+          throw error;
+        }),
+      );
       return;
     }
 

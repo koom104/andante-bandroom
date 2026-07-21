@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
+    "deploy:cloudflare": "pnpm run build && wrangler deploy --config dist/server/wrangler.json --name bandroom-ai --keep-vars && wrangler triggers deploy --config dist/server/wrangler.json --name bandroom-ai",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
