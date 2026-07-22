@@ -18,8 +18,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(payload.title, {
       body: payload.body,
       tag: payload.tag,
-      icon: "/favicon.svg",
-      badge: "/favicon.svg",
+      icon: "/icon-192.png",
+      badge: "/favicon-32x32.png",
       data: {
         url: payload.url || "/",
       },
