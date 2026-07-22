@@ -2052,7 +2052,7 @@ export default function Home() {
   return (
     <main className="app-viewport bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
-        <section className="relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
+        <section className="typography-balanced relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
               <AppHeader selectedTeam={selectedTeam} status={status} profile={profile} onSignOut={signOut} />
 
               <div className={`app-scroll flex-1 overflow-y-auto px-4 pt-3 ${isTextInputFocused ? "app-scroll-keyboard" : ""}`}>
@@ -2156,7 +2156,7 @@ export default function Home() {
                 )}
 
                 {activeTab === "team" && (
-                  <p className="pb-8 pt-1 text-center text-[9px] font-medium text-[#f7e6df]" aria-hidden="true">
+                  <p className="easter-egg-credit pb-8 pt-1 text-center text-[9px] font-medium text-[#f7e6df]" aria-hidden="true">
                     @41기 구강민 만듦
                   </p>
                 )}
@@ -2198,7 +2198,7 @@ function PhoneShell({ children }: { children: ReactNode }) {
   return (
     <main className="app-viewport bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
-        <section className="relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
+        <section className="typography-balanced relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
           <div className="app-shell-scroll flex-1 overflow-y-auto px-4 pt-4">{children}</div>
         </section>
       </div>

@@ -34,6 +34,40 @@ html {
   min-height: 100%;
 }
 
+/* A shared mobile type scale. Component dimensions stay unchanged while
+   labels, supporting copy, and controls gain one pixel of legibility. */
+.typography-balanced .text-\[8px\] {
+  font-size: 9px;
+}
+
+.typography-balanced .text-\[9px\] {
+  font-size: 10px;
+}
+
+.typography-balanced .text-\[10px\] {
+  font-size: 11px;
+}
+
+.typography-balanced .text-\[11px\] {
+  font-size: 12px;
+}
+
+.typography-balanced .text-xs {
+  font-size: 13px;
+}
+
+.typography-balanced .text-\[13px\] {
+  font-size: 14px;
+}
+
+.typography-balanced .text-sm {
+  font-size: 15px;
+}
+
+.typography-balanced .easter-egg-credit {
+  font-size: 9px;
+}
+
 /* Increase compact calendar and reservation copy without changing other tabs. */
 .readable-compact .text-\[8px\] {
   font-size: 9px;
