@@ -1527,6 +1527,13 @@ grant select, insert on public.booking_roster to authenticated;
 grant select, insert on public.booking_attendance_slots to authenticated;
 grant select, insert, update, delete on public.push_subscriptions to authenticated;
 grant select on public.push_notification_logs to authenticated;
+
+grant usage on schema public to service_role;
+grant select on table public.bookings to service_role;
+grant select on table public.teams to service_role;
+grant select on table public.team_members to service_role;
+grant select, update on table public.push_subscriptions to service_role;
+grant select, insert on table public.push_notification_logs to service_role;
 grant select, insert, delete on public.rehearsal_goal_categories to authenticated;
 grant select, insert, update on public.club_room_status to authenticated;
 
