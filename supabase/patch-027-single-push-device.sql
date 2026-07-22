@@ -1,7 +1,27 @@
--- Web Push helper RPCs.
--- Run this after supabase/patch-018-web-push.sql if push subscription or test notification shows permission errors.
+-- Keep only the most recently registered push device for each user.
+-- Run after supabase/patch-019-web-push-rpc.sql.
 
 begin;
+
+with ranked_subscriptions as (
+  select
+    id,
+    row_number() over (
+      partition by user_id
+      order by updated_at desc, created_at desc, id desc
+    ) as device_rank
+  from public.push_subscriptions
+  where disabled_at is null
+)
+update public.push_subscriptions ps
+set disabled_at = now()
+from ranked_subscriptions ranked
+where ps.id = ranked.id
+  and ranked.device_rank > 1;
+
+create unique index if not exists push_subscriptions_one_active_per_user
+on public.push_subscriptions (user_id)
+where disabled_at is null;
 
 create or replace function public.save_push_subscription(
   p_endpoint text,
@@ -66,51 +86,7 @@ begin
 end;
 $$;
 
-create or replace function public.get_my_push_subscriptions()
-returns table (
-  id uuid,
-  user_id uuid,
-  endpoint text,
-  p256dh text,
-  auth_key text
-)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select ps.id, ps.user_id, ps.endpoint, ps.p256dh, ps.auth_key
-  from public.push_subscriptions ps
-  where ps.user_id = auth.uid()
-    and ps.disabled_at is null
-    and exists (
-      select 1
-      from public.profiles p
-      where p.id = auth.uid()
-        and p.status = 'approved'
-    );
-$$;
-
-create or replace function public.disable_my_push_subscription(p_subscription_id uuid)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  update public.push_subscriptions
-  set disabled_at = now()
-  where id = p_subscription_id
-    and user_id = auth.uid();
-end;
-$$;
-
 revoke all on function public.save_push_subscription(text, text, text, text) from public;
-revoke all on function public.get_my_push_subscriptions() from public;
-revoke all on function public.disable_my_push_subscription(uuid) from public;
-
 grant execute on function public.save_push_subscription(text, text, text, text) to authenticated;
-grant execute on function public.get_my_push_subscriptions() to authenticated;
-grant execute on function public.disable_my_push_subscription(uuid) to authenticated;
 
 commit;

@@ -3354,7 +3354,7 @@ function MyPageTab({
 
       <MobilePanel title="푸시 알림">
         <p className="text-xs leading-5 text-slate-500">
-          합주 당일 오전 9시, 시작 30분 전, 일정 추가/취소 알림을 이 기기로 받을 수 있습니다. iPhone은 홈 화면에 추가한 Andante에서 허용해야 안정적으로 동작합니다.
+          합주 당일 오전 9시, 시작 30분 전, 일정 추가/취소 알림을 받을 수 있습니다. 새 기기를 등록하면 이전 기기의 알림은 해제됩니다. iPhone은 홈 화면에 추가한 Andante에서 허용해야 안정적으로 동작합니다.
         </p>
         {pushMessage && <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{pushMessage}</p>}
         <button

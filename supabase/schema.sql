@@ -287,6 +287,14 @@ begin
     raise exception '승인된 부원만 알림을 받을 수 있습니다.';
   end if;
 
+  perform pg_advisory_xact_lock(hashtext(requester_id::text));
+
+  update public.push_subscriptions
+  set disabled_at = now()
+  where user_id = requester_id
+    and disabled_at is null
+    and endpoint <> p_endpoint;
+
   insert into public.push_subscriptions (
     user_id,
     endpoint,
@@ -1230,6 +1238,10 @@ on public.push_notification_logs (user_id, notification_date, kind)
 where booking_id is null;
 
 create index if not exists push_subscriptions_user_id_idx
+on public.push_subscriptions (user_id)
+where disabled_at is null;
+
+create unique index if not exists push_subscriptions_one_active_per_user
 on public.push_subscriptions (user_id)
 where disabled_at is null;
 
