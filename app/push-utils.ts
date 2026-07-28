@@ -37,6 +37,47 @@ type PushPayload = {
 };
 
 const textEncoder = new TextEncoder();
+const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+const exactPushHosts = new Set([
+  "fcm.googleapis.com",
+  "push.services.mozilla.com",
+  "updates.push.services.mozilla.com",
+  "web.push.apple.com",
+]);
+
+export function isAllowedWebPushEndpoint(value: string) {
+  if (value.length < 16 || value.length > 2048) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const isKnownHost = exactPushHosts.has(hostname) || hostname.endsWith(".notify.windows.com");
+
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      (url.port === "" || url.port === "443") &&
+      isKnownHost
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isValidWebPushSubscription(subscription: Pick<PushSubscriptionRecord, "endpoint" | "p256dh" | "auth_key">) {
+  return (
+    isAllowedWebPushEndpoint(subscription.endpoint) &&
+    subscription.p256dh.length >= 40 &&
+    subscription.p256dh.length <= 256 &&
+    base64UrlPattern.test(subscription.p256dh) &&
+    subscription.auth_key.length >= 16 &&
+    subscription.auth_key.length <= 128 &&
+    base64UrlPattern.test(subscription.auth_key)
+  );
+}
 
 function base64UrlToUint8Array(value: string) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -143,6 +184,10 @@ async function encryptPushPayload(subscription: PushSubscriptionRecord, payload:
 export async function sendWebPush(subscription: PushSubscriptionRecord, payload: PushPayload, config: WebPushConfig) {
   if (!config.publicKey || !config.privateKey || !config.subject) {
     throw new Error("VAPID 설정이 없습니다.");
+  }
+
+  if (!isValidWebPushSubscription(subscription)) {
+    throw new Error("허용되지 않은 푸시 구독 정보입니다.");
   }
 
   const vapidToken = await createVapidToken(subscription.endpoint, config);

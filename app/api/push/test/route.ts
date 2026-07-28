@@ -26,6 +26,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "WEB_PUSH_PUBLIC_KEY 또는 WEB_PUSH_PRIVATE_KEY가 서버 환경변수에 없습니다." }, { status: 500 });
   }
 
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > 1_024) {
+    return NextResponse.json({ error: "요청이 너무 큽니다." }, { status: 413 });
+  }
+
   const authorization = request.headers.get("authorization") ?? "";
   const token = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
   if (!token) {
@@ -57,7 +62,7 @@ export async function POST(request: NextRequest) {
     .eq("id", userData.user.id)
     .maybeSingle();
   if (profileError) {
-    return NextResponse.json({ error: profileError.message }, { status: 500 });
+    return NextResponse.json({ error: "부원 승인 상태를 확인하지 못했습니다." }, { status: 500 });
   }
   if (!profile || profile.status !== "approved") {
     return NextResponse.json({ error: "승인된 부원만 테스트 알림을 받을 수 있습니다." }, { status: 403 });
@@ -69,7 +74,7 @@ export async function POST(request: NextRequest) {
       {
         error: isMissingPushSchema(subscriptionError)
           ? "Supabase SQL Editor에서 supabase/patch-018-web-push.sql과 supabase/patch-019-web-push-rpc.sql을 실행해 주세요."
-          : subscriptionError.message,
+          : "알림 구독 정보를 불러오지 못했습니다.",
       },
       { status: 500 },
     );

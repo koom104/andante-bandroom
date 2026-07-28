@@ -60,6 +60,41 @@ function getWebPushConfig(env: Env) {
   };
 }
 
+function withSecurityHeaders(response: Response, request: Request, env: Env) {
+  const headers = new Headers(response.headers);
+  const supabaseOrigin = new URL(getSupabaseUrl(env)).origin;
+  const csp = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    `connect-src 'self' ${supabaseOrigin} ${supabaseOrigin.replace("https://", "wss://")}`,
+    "font-src 'self' data:",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data: blob:",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "worker-src 'self'",
+  ].join("; ");
+
+  headers.set("content-security-policy", csp);
+  headers.set("permissions-policy", "camera=(), geolocation=(), microphone=()");
+  headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("x-frame-options", "DENY");
+
+  if (new URL(request.url).protocol === "https:") {
+    headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 function kstDateParts(timestamp = Date.now()) {
   const shifted = new Date(timestamp + 9 * 60 * 60 * 1000);
   const year = shifted.getUTCFullYear();
@@ -355,16 +390,28 @@ const worker = {
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
-        transformImage: async (body, { width, format, quality }) => {
-          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
-          return result.response();
+      const response = await handleImageOptimization(
+        request,
+        {
+          fetchAsset: (path) => {
+            const assetUrl = new URL(path, request.url);
+            if (assetUrl.origin !== url.origin) {
+              return Promise.resolve(new Response("Invalid asset URL", { status: 400 }));
+            }
+
+            return env.ASSETS.fetch(new Request(assetUrl));
+          },
+          transformImage: async (body, { width, format, quality }) => {
+            const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
+            return result.response();
+          },
         },
-      }, allowedWidths);
+        allowedWidths,
+      );
+      return withSecurityHeaders(response, request, env);
     }
 
-    return handler.fetch(request, env, ctx);
+    return withSecurityHeaders(await handler.fetch(request, env, ctx), request, env);
   },
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     if (event.cron === "0 0 * * *") {

@@ -7,11 +7,35 @@ const SUPABASE_PUBLISHABLE_KEY =
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 function generateTemporaryPassword() {
-  const bytes = new Uint8Array(12);
-  crypto.getRandomValues(bytes);
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const groups = [
+    "ABCDEFGHJKLMNPQRSTUVWXYZ",
+    "abcdefghijkmnopqrstuvwxyz",
+    "23456789",
+    "!@#$%",
+  ];
+  const alphabet = groups.join("");
+  const randomIndex = (length: number) => {
+    const limit = 256 - (256 % length);
+    const byte = new Uint8Array(1);
 
-  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+    do {
+      crypto.getRandomValues(byte);
+    } while (byte[0] >= limit);
+
+    return byte[0] % length;
+  };
+  const characters = groups.map((group) => group[randomIndex(group.length)]);
+
+  while (characters.length < 16) {
+    characters.push(alphabet[randomIndex(alphabet.length)]);
+  }
+
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomIndex(index + 1);
+    [characters[index], characters[swapIndex]] = [characters[swapIndex], characters[index]];
+  }
+
+  return characters.join("");
 }
 
 function isMissingPasswordResetColumn(message: string) {
@@ -23,10 +47,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다." }, { status: 500 });
   }
 
-  const body = (await request.json().catch(() => null)) as { userId?: string; accessToken?: string } | null;
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > 4_096) {
+    return NextResponse.json({ error: "요청이 너무 큽니다." }, { status: 413 });
+  }
+
+  const body = (await request.json().catch(() => null)) as { userId?: string } | null;
   const authorization = request.headers.get("authorization") ?? "";
-  const headerToken = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
-  const token = headerToken || body?.accessToken || "";
+  const token = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
 
   if (!token) {
     return NextResponse.json({ error: "관리자 세션을 확인할 수 없습니다. 새로고침 후 다시 시도해 주세요." }, { status: 401 });
@@ -34,7 +62,7 @@ export async function POST(request: NextRequest) {
 
   const targetUserId = body?.userId;
 
-  if (!targetUserId) {
+  if (!targetUserId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId)) {
     return NextResponse.json({ error: "리셋할 부원을 선택해 주세요." }, { status: 400 });
   }
 
@@ -61,7 +89,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "관리자 세션을 확인할 수 없습니다. 로그아웃 후 다시 로그인해 주세요." }, { status: 401 });
   }
 
-  const { data: requesterProfile, error: requesterProfileError } = await requesterClient
+  const { data: requesterProfile, error: requesterProfileError } = await adminClient
     .from("profiles")
     .select("role,status")
     .eq("id", requesterData.user.id)
@@ -76,13 +104,10 @@ export async function POST(request: NextRequest) {
   }
 
   if (!["admin", "manager"].includes(requesterProfile.role) || requesterProfile.status !== "approved") {
-    return NextResponse.json(
-      { error: `관리 권한 계정만 비밀번호를 리셋할 수 있습니다. 현재 권한: ${requesterProfile.role} / ${requesterProfile.status}` },
-      { status: 403 },
-    );
+    return NextResponse.json({ error: "관리 권한 계정만 비밀번호를 리셋할 수 있습니다." }, { status: 403 });
   }
 
-  const { data: targetProfile, error: targetProfileError } = await requesterClient
+  const { data: targetProfile, error: targetProfileError } = await adminClient
     .from("profiles")
     .select("id,role,status,password_reset_required")
     .eq("id", targetUserId)
@@ -110,12 +135,51 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "관리자 계정은 이 기능으로 리셋할 수 없습니다." }, { status: 400 });
   }
 
+  if (requesterProfile.role === "manager" && targetProfile.role !== "member") {
+    return NextResponse.json({ error: "집기 계정은 일반 부원의 비밀번호만 리셋할 수 있습니다." }, { status: 403 });
+  }
+
+  const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
+  const { data: recentReset } = await adminClient
+    .from("audit_logs")
+    .select("id")
+    .eq("action", "reset_password")
+    .eq("target_id", targetUserId)
+    .gte("created_at", oneMinuteAgo)
+    .limit(1)
+    .maybeSingle();
+
+  if (recentReset) {
+    return NextResponse.json({ error: "방금 임시 비밀번호를 발급했습니다. 1분 뒤 다시 시도해 주세요." }, { status: 429 });
+  }
+
   const temporaryPassword = generateTemporaryPassword();
+  const { error: prepareProfileError } = await adminClient
+    .from("profiles")
+    .update({ password_reset_required: true })
+    .eq("id", targetUserId);
+
+  if (prepareProfileError) {
+    if (isMissingPasswordResetColumn(prepareProfileError.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "Supabase DB에 password_reset_required 컬럼이 아직 없습니다. supabase/patch-016-password-reset.sql을 SQL Editor에서 실행한 뒤 다시 시도해 주세요.",
+        },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ error: "비밀번호 변경 상태를 준비하지 못했습니다." }, { status: 500 });
+  }
+
   const { error: updateAuthError } = await adminClient.auth.admin.updateUserById(targetUserId, {
     password: temporaryPassword,
   });
 
   if (updateAuthError) {
+    await adminClient.from("profiles").update({ password_reset_required: false }).eq("id", targetUserId);
+
     if (updateAuthError.message.toLowerCase().includes("invalid api key")) {
       return NextResponse.json(
         {
@@ -126,27 +190,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ error: updateAuthError.message }, { status: 500 });
+    return NextResponse.json({ error: "임시 비밀번호 발급에 실패했습니다." }, { status: 500 });
   }
 
-  const { error: updateProfileError } = await requesterClient
-    .from("profiles")
-    .update({ password_reset_required: true })
-    .eq("id", targetUserId);
+  await adminClient.from("audit_logs").insert({
+    actor_id: requesterData.user.id,
+    action: "reset_password",
+    target_type: "profile",
+    target_id: targetUserId,
+    reason: "임시 비밀번호 발급",
+  });
 
-  if (updateProfileError) {
-    if (isMissingPasswordResetColumn(updateProfileError.message)) {
-      return NextResponse.json(
-        {
-          error:
-            "임시 비밀번호는 발급됐지만 password_reset_required 컬럼이 없어 강제 변경 표시를 저장하지 못했습니다. supabase/patch-016-password-reset.sql을 실행한 뒤 다시 발급해 주세요.",
-        },
-        { status: 500 },
-      );
-    }
-
-    return NextResponse.json({ error: updateProfileError.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ temporaryPassword });
+  return NextResponse.json(
+    { temporaryPassword },
+    {
+      headers: {
+        "cache-control": "no-store",
+      },
+    },
+  );
 }

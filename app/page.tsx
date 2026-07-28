@@ -861,6 +861,9 @@ export default function Home() {
 
     setIsLoadingData(true);
     setDbError(null);
+    const profileRequest = canUseAdminTab(profile)
+      ? supabase.from("profiles").select("*").order("created_at", { ascending: true })
+      : supabase.rpc("get_member_directory");
 
     const [
       profileResult,
@@ -872,7 +875,7 @@ export default function Home() {
       rehearsalLeaderboardResult,
       teamRehearsalTotalsResult,
     ] = await Promise.all([
-      supabase.from("profiles").select("*").order("created_at", { ascending: true }),
+      profileRequest,
       supabase.from("teams").select("*").order("created_at", { ascending: true }),
       supabase.from("team_members").select("*").order("created_at", { ascending: true }),
       supabase.from("bookings").select("*").eq("status", "confirmed").gte("booking_date", todayISO()).order("booking_date", { ascending: true }).order("start_time", { ascending: true }),
@@ -895,7 +898,13 @@ export default function Home() {
       return;
     }
 
-    const nextProfiles = (profileResult.data ?? []) as Profile[];
+    const nextProfiles = ((profileResult.data ?? []) as Array<Partial<Profile> & Pick<Profile, "id" | "name" | "cohort" | "role" | "status">>).map(
+      (item) => ({
+        ...item,
+        email: item.email ?? "",
+        student_no: item.student_no ?? "",
+      }),
+    ) as Profile[];
     const nextGoalCategories = goalCategoryError ? [] : ((goalCategoryResult.data ?? []) as GoalCategory[]);
     const profileMap = new Map(nextProfiles.map((item) => [item.id, item]));
     const clubRoomStatusError = clubRoomStatusResult.error ? getErrorMessage(clubRoomStatusResult.error) : "";
@@ -1744,14 +1753,10 @@ export default function Home() {
       return;
     }
 
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        status: nextStatus,
-        approved_by: profile.id,
-        approved_at: nextStatus === "approved" ? new Date().toISOString() : null,
-      })
-      .eq("id", profileId);
+    const { error } = await supabase.rpc("review_profile_signup", {
+      p_profile_id: profileId,
+      p_status: nextStatus,
+    });
 
     if (error) {
       setStatus(getErrorMessage(error));
@@ -1804,7 +1809,7 @@ export default function Home() {
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ userId, accessToken: token }),
+      body: JSON.stringify({ userId }),
     });
     const result = (await response.json().catch(() => null)) as { temporaryPassword?: string; error?: string } | null;
 
@@ -1975,25 +1980,8 @@ export default function Home() {
 
     if (error) {
       const message = getErrorMessage(error);
-      if (canUseAdminTab(profile) && message.includes("cancel_booking")) {
-        const fallback = await supabase
-          .from("bookings")
-          .update({
-            status: "cancelled",
-            cancelled_by: profile.id,
-            cancelled_at: new Date().toISOString(),
-            cancel_reason: reason || "관리자 취소",
-          })
-          .eq("id", bookingId);
-
-        if (fallback.error) {
-          setStatus(getErrorMessage(fallback.error));
-          return;
-        }
-      } else {
-        setStatus(message);
-        return;
-      }
+      setStatus(message);
+      return;
     }
 
     setStatus("예약을 취소했어요.");

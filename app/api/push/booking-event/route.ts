@@ -43,14 +43,17 @@ function webPushConfig() {
   };
 }
 
-function isMissingPushTargetRpc(error: { code?: string }) {
-  return error.code === "42883" || error.code === "PGRST202";
-}
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest) {
   const config = webPushConfig();
   if (!config.publicKey || !config.privateKey) {
     return NextResponse.json({ error: "WEB_PUSH_PUBLIC_KEY 또는 WEB_PUSH_PRIVATE_KEY가 서버 환경변수에 없습니다." }, { status: 500 });
+  }
+
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > 8_192) {
+    return NextResponse.json({ error: "요청이 너무 큽니다." }, { status: 413 });
   }
 
   const authorization = request.headers.get("authorization") ?? "";
@@ -63,7 +66,12 @@ export async function POST(request: NextRequest) {
   const bookingIds = Array.from(new Set(body?.bookingIds ?? [])).filter(Boolean);
   const kind = body?.kind;
 
-  if (!kind || bookingIds.length === 0) {
+  if (
+    (kind !== "booking_created" && kind !== "booking_cancelled") ||
+    bookingIds.length === 0 ||
+    bookingIds.length > 20 ||
+    bookingIds.some((bookingId) => !uuidPattern.test(bookingId))
+  ) {
     return NextResponse.json({ error: "알림 종류와 예약 ID가 필요합니다." }, { status: 400 });
   }
 
@@ -85,25 +93,59 @@ export async function POST(request: NextRequest) {
 
   const { data: requesterProfile, error: requesterError } = await requesterClient
     .from("profiles")
-    .select("id,status")
+    .select("id,status,role")
     .eq("id", userData.user.id)
     .maybeSingle();
   if (requesterError) {
-    return NextResponse.json({ error: requesterError.message }, { status: 500 });
+    return NextResponse.json({ error: "부원 권한을 확인하지 못했습니다." }, { status: 500 });
   }
   if (!requesterProfile || requesterProfile.status !== "approved") {
     return NextResponse.json({ error: "승인된 부원만 알림을 보낼 수 있습니다." }, { status: 403 });
   }
 
-  const { data: targets, error: targetError } = await requesterClient.rpc("get_booking_push_targets", {
+  const { data: requestedBookings, error: bookingError } = await requesterClient
+    .from("bookings")
+    .select("id,team_id,status")
+    .in("id", bookingIds);
+  if (bookingError) {
+    return NextResponse.json({ error: "예약 정보를 확인하지 못했습니다." }, { status: 500 });
+  }
+
+  const expectedStatus = kind === "booking_created" ? "confirmed" : "cancelled";
+  if (
+    requestedBookings.length !== bookingIds.length ||
+    requestedBookings.some((booking) => booking.status !== expectedStatus)
+  ) {
+    return NextResponse.json({ error: "현재 예약 상태와 알림 종류가 일치하지 않습니다." }, { status: 409 });
+  }
+
+  const isManager = requesterProfile.role === "admin" || requesterProfile.role === "manager";
+  if (!isManager) {
+    const teamIds = Array.from(new Set(requestedBookings.map((booking) => booking.team_id)));
+    const { data: leaderships, error: leadershipError } = await requesterClient
+      .from("team_members")
+      .select("team_id")
+      .eq("user_id", userData.user.id)
+      .eq("is_leader", true)
+      .in("team_id", teamIds);
+    const ledTeamIds = new Set((leaderships ?? []).map((membership) => membership.team_id));
+
+    if (leadershipError || teamIds.some((teamId) => !ledTeamIds.has(teamId))) {
+      return NextResponse.json({ error: "해당 팀의 팀장만 예약 알림을 보낼 수 있습니다." }, { status: 403 });
+    }
+  }
+
+  const { data: targets, error: targetError } = await requesterClient.rpc("claim_booking_push_targets", {
     p_booking_ids: bookingIds,
+    p_kind: kind,
   });
+
   if (targetError) {
     return NextResponse.json(
       {
-        error: isMissingPushTargetRpc(targetError)
-          ? "Supabase SQL Editor에서 supabase/patch-020-booking-push-targets.sql을 실행해 주세요."
-          : targetError.message,
+        error: targetError.code === "42883" || targetError.code === "PGRST202"
+          ? "Supabase SQL Editor에서 supabase/patch-028-security-hardening.sql을 실행해 주세요."
+          : "알림 대상을 확인하지 못했습니다.",
       },
       { status: 500 },
     );

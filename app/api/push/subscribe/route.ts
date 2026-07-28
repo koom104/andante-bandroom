@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { isValidWebPushSubscription } from "../../../push-utils";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -20,6 +21,11 @@ function isMissingPushSchema(error: { code?: string; message?: string }) {
 }
 
 export async function POST(request: NextRequest) {
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > 16_384) {
+    return NextResponse.json({ error: "푸시 구독 정보가 너무 큽니다." }, { status: 413 });
+  }
+
   const authorization = request.headers.get("authorization") ?? "";
   const token = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
 
@@ -33,7 +39,13 @@ export async function POST(request: NextRequest) {
   const p256dh = subscription?.keys?.p256dh ?? "";
   const auth = subscription?.keys?.auth ?? "";
 
-  if (!endpoint || !p256dh || !auth) {
+  if (
+    !isValidWebPushSubscription({
+      endpoint,
+      p256dh,
+      auth_key: auth,
+    })
+  ) {
     return NextResponse.json({ error: "푸시 구독 정보가 올바르지 않습니다." }, { status: 400 });
   }
 
@@ -61,7 +73,7 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
 
   if (profileError) {
-    return NextResponse.json({ error: profileError.message }, { status: 500 });
+    return NextResponse.json({ error: "부원 승인 상태를 확인하지 못했습니다." }, { status: 500 });
   }
 
   if (!profile || profile.status !== "approved") {
@@ -72,7 +84,7 @@ export async function POST(request: NextRequest) {
     p_endpoint: endpoint,
     p_p256dh: p256dh,
     p_auth_key: auth,
-    p_user_agent: request.headers.get("user-agent") ?? "",
+    p_user_agent: (request.headers.get("user-agent") ?? "").slice(0, 512),
   });
 
   if (error) {
@@ -80,7 +92,7 @@ export async function POST(request: NextRequest) {
       {
         error: isMissingPushSchema(error)
           ? "Supabase SQL Editor에서 supabase/patch-018-web-push.sql과 supabase/patch-019-web-push-rpc.sql을 실행해 주세요."
-          : error.message,
+          : "푸시 구독 정보를 저장하지 못했습니다.",
       },
       { status: 500 },
     );
