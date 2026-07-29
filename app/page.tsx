@@ -2929,7 +2929,7 @@ function CalendarTab({
                         className="block truncate rounded-sm border border-[#efc9c1] bg-[#fff8f4] px-0.5 py-0.5 text-[9px] font-semibold leading-3 text-[#a84037]"
                         title={`${reservation.start} ${reservation.teamName}`}
                       >
-                        {reservation.location === "external" ? `외부 · ${reservation.teamName}` : reservation.teamName}
+                        {reservation.location === "external" ? `${reservation.teamName} · 외부` : reservation.teamName}
                       </span>
                     ))}
                     {dayReservations.length > 4 && (
