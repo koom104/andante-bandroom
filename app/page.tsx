@@ -23,6 +23,7 @@ type ScheduleColumn = {
 };
 
 type ScheduleScope = "weekly" | "date";
+type BookingLocation = "club_room" | "external";
 
 type Profile = {
   id: string;
@@ -81,6 +82,7 @@ type Reservation = {
   duration: number;
   purpose: string;
   status: "confirmed" | "cancelled";
+  location: BookingLocation;
   attendanceUserIds?: string[];
 };
 
@@ -603,11 +605,15 @@ function buildBookingSlots(
   rehearsalBusy: Record<string, string[]>,
   reservations: Reservation[],
   date: string,
+  location: BookingLocation,
 ) {
   const day = dateToDay(date);
 
   return timeSlots.map((time): BookingSlot => {
-    const reservation = findReservation(reservations, date, time);
+    const reservation =
+      location === "club_room"
+        ? reservations.find((item) => item.location === "club_room" && isReserved(item, date, time))
+        : undefined;
     const slots = reservationSlots(time, 0.5);
 
     if (reservation) {
@@ -773,10 +779,18 @@ export default function Home() {
   const [rehearsalLeaderboardRows, setRehearsalLeaderboardRows] = useState<RehearsalRankRow[]>([]);
   const [teamRehearsalTotals, setTeamRehearsalTotals] = useState<Record<string, TeamRehearsalTotal>>({});
   const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedBookingGoal, setSelectedBookingGoal] = useState("");
+  const [selectedBookingLocation, setSelectedBookingLocation] = useState<BookingLocation | "">("");
   const [selectedBookingDate, setSelectedBookingDate] = useState(todayISO);
-  const [bookingSelection, setBookingSelection] = useState<{ teamId: string; date: string; times: string[] }>({
+  const [bookingSelection, setBookingSelection] = useState<{
+    teamId: string;
+    date: string;
+    location: BookingLocation | "";
+    times: string[];
+  }>({
     teamId: "",
     date: todayISO(),
+    location: "",
     times: [],
   });
   const [activeTab, setActiveTab] = useState<Tab>("booking");
@@ -1034,6 +1048,7 @@ export default function Home() {
       duration: number;
       purpose: string;
       status: "confirmed" | "cancelled";
+      booking_location?: BookingLocation | null;
     }>;
     const bookingIds = bookingRows.map((booking) => booking.id);
     const bookingAttendanceResult =
@@ -1071,6 +1086,7 @@ export default function Home() {
         duration: booking.duration,
         purpose: booking.purpose,
         status: booking.status,
+        location: booking.booking_location === "external" ? "external" : "club_room",
         attendanceUserIds: bookingAttendanceError ? undefined : attendanceByBooking.get(booking.id) ?? [],
       };
     });
@@ -1217,7 +1233,8 @@ export default function Home() {
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
   const leaderTeams = useMemo(() => teams.filter((team) => team.leaderId === profile?.id), [teams, profile?.id]);
-  const selectedBookingTeam = leaderTeams.find((team) => team.id === selectedTeamId) ?? null;
+  const selectedBookingTeam =
+    leaderTeams.find((team) => team.id === selectedTeamId && team.song === selectedBookingGoal) ?? null;
   const bookingBusy = useMemo(() => selectedBookingTeam?.busy ?? emptyBusy, [selectedBookingTeam]);
   const selectedBookingTeamRehearsals = useMemo(
     () => Object.fromEntries((selectedBookingTeam?.members ?? []).map((member) => [member.id, rehearsalByUser[member.id] ?? []])),
@@ -1234,9 +1251,19 @@ export default function Home() {
             selectedBookingTeamRehearsals,
             reservations,
             selectedBookingDate,
+            selectedBookingLocation || "club_room",
           )
         : [],
-    [selectedBookingTeam, bookingBusy, dateBusyByUser, dateOverrideByUser, selectedBookingTeamRehearsals, reservations, selectedBookingDate],
+    [
+      selectedBookingTeam,
+      bookingBusy,
+      dateBusyByUser,
+      dateOverrideByUser,
+      selectedBookingTeamRehearsals,
+      reservations,
+      selectedBookingDate,
+      selectedBookingLocation,
+    ],
   );
   const selectableBookingTimes = useMemo(
     () => bookingSlots.filter((slot) => slot.status !== "reserved").map((slot) => slot.time),
@@ -1244,10 +1271,14 @@ export default function Home() {
   );
   const selectedBookingTimes = useMemo(() => {
     const rawSelectedBookingTimes =
-      bookingSelection.teamId === (selectedBookingTeam?.id ?? "") && bookingSelection.date === selectedBookingDate ? bookingSelection.times : [];
+      bookingSelection.teamId === (selectedBookingTeam?.id ?? "") &&
+      bookingSelection.date === selectedBookingDate &&
+      bookingSelection.location === selectedBookingLocation
+        ? bookingSelection.times
+        : [];
     const selectableTimes = new Set(selectableBookingTimes);
     return rawSelectedBookingTimes.filter((time) => selectableTimes.has(time));
-  }, [bookingSelection, selectedBookingTeam?.id, selectedBookingDate, selectableBookingTimes]);
+  }, [bookingSelection, selectedBookingTeam?.id, selectedBookingDate, selectedBookingLocation, selectableBookingTimes]);
   const upcomingReservations = reservations
     .filter((reservation) => isFutureReservation(reservation))
     .slice()
@@ -1350,14 +1381,43 @@ export default function Home() {
     setStatus("비밀번호를 다시 설정했어요.");
   }
 
+  function changeBookingGoal(goal: string) {
+    setSelectedBookingGoal(goal);
+    setSelectedTeamId("");
+    setSelectedBookingLocation("");
+    setBookingSelection({
+      teamId: "",
+      date: selectedBookingDate,
+      location: "",
+      times: [],
+    });
+  }
+
   function changeTeam(teamId: string) {
-    const nextTeam = leaderTeams.find((team) => team.id === teamId);
+    const nextTeam = leaderTeams.find((team) => team.id === teamId && team.song === selectedBookingGoal);
     if (!nextTeam) {
       return;
     }
 
     setSelectedTeamId(nextTeam.id);
+    setSelectedBookingLocation("");
+    setBookingSelection({
+      teamId: nextTeam.id,
+      date: selectedBookingDate,
+      location: "",
+      times: [],
+    });
     setStatus(`${nextTeam.name} 팀을 선택했어요.`);
+  }
+
+  function changeBookingLocation(location: BookingLocation) {
+    setSelectedBookingLocation(location);
+    setBookingSelection({
+      teamId: selectedBookingTeam?.id ?? "",
+      date: selectedBookingDate,
+      location,
+      times: [],
+    });
   }
 
   async function setScheduleSlots(userId: string, slots: ScheduleSlotSelection[], isBusy: boolean) {
@@ -1638,6 +1698,14 @@ export default function Home() {
     const message = getErrorMessage(error);
 
     if (
+      message.includes("booking_location") ||
+      message.includes("합주 장소") ||
+      message.includes("create_bookings_with_location")
+    ) {
+      return "Supabase SQL Editor에서 patch-029-booking-location.sql을 먼저 실행해 주세요.";
+    }
+
+    if (
       message.includes("create_booking") ||
       message.includes("create_bookings") ||
       message.includes("booking_date") ||
@@ -1657,7 +1725,11 @@ export default function Home() {
 
     setBookingSelection((currentSelection) => {
       const currentTimes =
-        currentSelection.teamId === teamId && currentSelection.date === selectedBookingDate ? currentSelection.times : [];
+        currentSelection.teamId === teamId &&
+        currentSelection.date === selectedBookingDate &&
+        currentSelection.location === selectedBookingLocation
+          ? currentSelection.times
+          : [];
       const nextTimes = currentTimes.includes(time)
         ? currentTimes.filter((item) => item !== time)
         : [...currentTimes, time].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
@@ -1665,6 +1737,7 @@ export default function Home() {
       return {
         teamId,
         date: selectedBookingDate,
+        location: selectedBookingLocation,
         times: nextTimes,
       };
     });
@@ -1674,6 +1747,7 @@ export default function Home() {
     setBookingSelection({
       teamId: selectedBookingTeam?.id ?? "",
       date: selectedBookingDate,
+      location: selectedBookingLocation,
       times: [],
     });
   }
@@ -1696,8 +1770,12 @@ export default function Home() {
 
   async function reserveSelectedBookingTimes() {
     if (!selectedBookingTeam) {
-      setActiveTab("team");
-      setStatus("팀장만 예약 가능합니다.");
+      setStatus("합주 목표와 예약할 팀을 먼저 선택해 주세요.");
+      return;
+    }
+
+    if (!selectedBookingLocation) {
+      setStatus("합주 장소를 먼저 선택해 주세요.");
       return;
     }
 
@@ -1718,7 +1796,7 @@ export default function Home() {
     const bookingDay = dateToDay(selectedBookingDate);
     const bookingGroups = groupBookingTimes(validTimes);
 
-    const { data, error } = await supabase.rpc("create_bookings", {
+    const { data, error } = await supabase.rpc("create_bookings_with_location", {
       p_team_id: selectedBookingTeam.id,
       p_day: bookingDay,
       p_booking_date: selectedBookingDate,
@@ -1726,6 +1804,7 @@ export default function Home() {
       p_groups: bookingGroups.map((group) => ({
         start_time: group.start,
         duration: group.duration,
+        location: selectedBookingLocation,
       })),
     });
 
@@ -2068,8 +2147,13 @@ export default function Home() {
                 {activeTab === "suggestions" && (
                   <SuggestionsTab
                     leaderTeams={leaderTeams}
+                    goalCategories={goalCategories}
+                    selectedGoal={selectedBookingGoal}
+                    changeGoal={changeBookingGoal}
                     selectedTeam={selectedBookingTeam}
                     changeTeam={changeTeam}
+                    selectedLocation={selectedBookingLocation}
+                    changeLocation={changeBookingLocation}
                     selectedDate={selectedBookingDate}
                     setSelectedDate={setSelectedBookingDate}
                     slots={bookingSlots}
@@ -2085,6 +2169,7 @@ export default function Home() {
                     accessToken={session.access_token}
                     teams={teams}
                     allTeams={allTeams}
+                    goalCategories={goalCategories}
                     approvedProfiles={approvedProfiles}
                     reservations={reservations}
                     rehearsalLeaderboardRows={rehearsalLeaderboardRows}
@@ -2163,6 +2248,8 @@ export default function Home() {
                       onClick={() => {
                         if (tab.id === "suggestions" && activeTab !== "suggestions") {
                           setSelectedTeamId("");
+                          setSelectedBookingGoal("");
+                          setSelectedBookingLocation("");
                         }
                         setActiveTab(tab.id);
                       }}
@@ -2647,7 +2734,12 @@ function BookingTab({
                 <div key={reservation.id} className="rounded-md border border-[#f0ded7] bg-white p-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-[13px] font-semibold leading-4">{formatDateLabel(date)}</p>
+                      <div className="flex items-center gap-1">
+                        <p className="text-[13px] font-semibold leading-4">{formatDateLabel(date)}</p>
+                        {reservation.location === "external" && (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">외부</span>
+                        )}
+                      </div>
                       <p className="mt-0.5 truncate text-[10px] leading-4 text-slate-500">
                         {reservation.teamName} - {reservation.purpose || reservation.teamSong || "합주"}
                       </p>
@@ -2681,6 +2773,7 @@ function BookingTab({
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
                       {reservation.teamName} · {reservation.purpose || reservation.teamSong || "합주"}
+                      {reservation.location === "external" ? " · 외부" : ""}
                     </p>
                   </div>
                   <button
@@ -2836,7 +2929,7 @@ function CalendarTab({
                         className="block truncate rounded-sm border border-[#efc9c1] bg-[#fff8f4] px-0.5 py-0.5 text-[9px] font-semibold leading-3 text-[#a84037]"
                         title={`${reservation.start} ${reservation.teamName}`}
                       >
-                        {reservation.teamName}
+                        {reservation.location === "external" ? `외부 · ${reservation.teamName}` : reservation.teamName}
                       </span>
                     ))}
                     {dayReservations.length > 4 && (
@@ -2857,8 +2950,13 @@ function CalendarTab({
 
 function SuggestionsTab({
   leaderTeams,
+  goalCategories,
+  selectedGoal,
+  changeGoal,
   selectedTeam,
   changeTeam,
+  selectedLocation,
+  changeLocation,
   selectedDate,
   setSelectedDate,
   slots,
@@ -2867,8 +2965,13 @@ function SuggestionsTab({
   onReserveSelected,
 }: {
   leaderTeams: Team[];
+  goalCategories: GoalCategory[];
+  selectedGoal: string;
+  changeGoal: (goal: string) => void;
   selectedTeam: Team | null;
   changeTeam: (teamId: string) => void;
+  selectedLocation: BookingLocation | "";
+  changeLocation: (location: BookingLocation) => void;
   selectedDate: string;
   setSelectedDate: (date: string) => void;
   slots: BookingSlot[];
@@ -2877,6 +2980,7 @@ function SuggestionsTab({
   onReserveSelected: () => Promise<void>;
 }) {
   const [slotFilter, setSlotFilter] = useState<BookingSlotFilter>("all");
+  const goalTeams = selectedGoal ? leaderTeams.filter((team) => team.song === selectedGoal) : [];
   const availableCount = slots.filter((slot) => slot.status === "available").length;
   const limitedCount = slots.filter((slot) => slot.status === "limited").length;
   const reservedCount = slots.filter((slot) => slot.status === "reserved").length;
@@ -2891,21 +2995,19 @@ function SuggestionsTab({
 
   return (
     <div className="space-y-3">
-      <MobilePanel title="예약 팀 선택">
+      <MobilePanel title="합주 목표 선택">
         {leaderTeams.length > 0 ? (
           <label className="block">
             <select
-              aria-label="예약할 팀"
-              value={selectedTeam?.id ?? ""}
-              onChange={(event) => changeTeam(event.target.value)}
+              aria-label="합주 목표"
+              value={selectedGoal}
+              onChange={(event) => changeGoal(event.target.value)}
               className="reservation-team-select h-9 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-[13px] font-semibold outline-none transition focus:border-[#ff665a]"
             >
-              <option value="">
-                팀을 선택해 주세요
-              </option>
-              {leaderTeams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name} · {team.song || "합주 목표 없음"}
+              <option value="">합주 목표를 선택해 주세요</option>
+              {goalCategories.map((category) => (
+                <option key={category.id} value={category.name}>
+                  {category.name}
                 </option>
               ))}
             </select>
@@ -2915,7 +3017,60 @@ function SuggestionsTab({
         )}
       </MobilePanel>
 
+      {selectedGoal && (
+        <MobilePanel title="예약 팀 선택">
+          {goalTeams.length > 0 ? (
+            <label className="block">
+              <select
+                aria-label="예약할 팀"
+                value={selectedTeam?.id ?? ""}
+                onChange={(event) => changeTeam(event.target.value)}
+                className="reservation-team-select h-9 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-[13px] font-semibold outline-none transition focus:border-[#ff665a]"
+              >
+                <option value="">팀을 선택해 주세요</option>
+                {goalTeams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <EmptyText text="선택한 합주 목표에 예약 가능한 팀이 없습니다." />
+          )}
+        </MobilePanel>
+      )}
+
       {selectedTeam && (
+        <MobilePanel title="합주 장소 선택">
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { id: "club_room", label: "동아리방" },
+              { id: "external", label: "외부 합주실" },
+            ] as Array<{ id: BookingLocation; label: string }>).map((location) => (
+              <button
+                key={location.id}
+                type="button"
+                onClick={() => changeLocation(location.id)}
+                className={`h-10 rounded-lg border text-xs font-semibold ${
+                  selectedLocation === location.id
+                    ? "border-slate-950 bg-slate-950 text-white"
+                    : "border-[#f0ded7] bg-white text-slate-600"
+                }`}
+              >
+                {location.label}
+              </button>
+            ))}
+          </div>
+          {selectedLocation === "external" && (
+            <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+              외부 합주실은 다른 예약과 시간이 겹쳐도 예약할 수 있습니다.
+            </p>
+          )}
+        </MobilePanel>
+      )}
+
+      {selectedTeam && selectedLocation && (
         <>
       <MobilePanel title="날짜 선택">
         <ThreeWeekCalendar selectedDate={selectedDate} onSelectDate={setSelectedDate} compact />
@@ -3085,6 +3240,7 @@ function MyPageTab({
   accessToken,
   teams,
   allTeams,
+  goalCategories,
   approvedProfiles,
   reservations,
   rehearsalLeaderboardRows,
@@ -3102,6 +3258,7 @@ function MyPageTab({
   accessToken: string;
   teams: Team[];
   allTeams: Team[];
+  goalCategories: GoalCategory[];
   approvedProfiles: Profile[];
   reservations: Reservation[];
   rehearsalLeaderboardRows: RehearsalRankRow[];
@@ -3118,6 +3275,7 @@ function MyPageTab({
   const [scheduleScope, setScheduleScope] = useState<ScheduleScope>("weekly");
   const [scheduleDate, setScheduleDate] = useState(todayISO);
   const [showsLeaderboard, setShowsLeaderboard] = useState(false);
+  const [selectedMembershipGoal, setSelectedMembershipGoal] = useState("");
   const [pushMessage, setPushMessage] = useState("");
   const [isSavingPush, setIsSavingPush] = useState(false);
   const [isSendingTestPush, setIsSendingTestPush] = useState(false);
@@ -3127,6 +3285,9 @@ function MyPageTab({
       return member ? { team, role: member.role } : null;
     })
     .filter((item): item is { team: Team; role: SessionRole } => Boolean(item));
+  const filteredMemberships = selectedMembershipGoal
+    ? memberships.filter(({ team }) => team.song === selectedMembershipGoal)
+    : [];
   const rehearsalStats = useMemo(() => {
     const currentRow = rehearsalLeaderboardRows.find((row) => row.userId === profile.id);
 
@@ -3150,7 +3311,7 @@ function MyPageTab({
     scheduleScope === "date"
       ? [{ label: formatDateShort(scheduleDate), day: scheduleDateDay, date: scheduleDate }]
       : dateDayNames.map((day) => ({ label: day, day }));
-  const teamListClassName = memberships.length > 4 ? "max-h-56 overflow-y-auto pr-1" : "";
+  const teamListClassName = filteredMemberships.length > 4 ? "max-h-56 overflow-y-auto pr-1" : "";
 
   async function enablePushNotifications() {
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
@@ -3289,15 +3450,36 @@ function MyPageTab({
       </MobilePanel>
 
       <MobilePanel title="소속 팀">
+        <label className="mb-3 block">
+          <span className="text-xs font-semibold text-slate-500">합주 목표</span>
+          <select
+            value={selectedMembershipGoal}
+            onChange={(event) => setSelectedMembershipGoal(event.target.value)}
+            disabled={goalCategories.length === 0}
+            className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a] disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            <option value="">
+              {goalCategories.length === 0 ? "등록된 합주 목표가 없습니다." : "합주 목표를 선택해 주세요"}
+            </option>
+            {goalCategories.map((category) => (
+              <option key={category.id} value={category.name}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className={`space-y-2 ${teamListClassName}`}>
-          {memberships.map(({ team, role }) => (
+          {filteredMemberships.map(({ team, role }) => (
             <div key={team.id} className="rounded-lg border border-[#f0ded7] bg-white px-3 py-3">
               <p className="text-sm font-semibold">
                 {team.name} - {role}
               </p>
             </div>
           ))}
-          {memberships.length === 0 && <EmptyText text="아직 소속된 팀이 없습니다." />}
+          {!selectedMembershipGoal && goalCategories.length > 0 && <EmptyText text="합주 목표를 선택하면 소속 팀이 표시됩니다." />}
+          {selectedMembershipGoal && filteredMemberships.length === 0 && (
+            <EmptyText text="선택한 합주 목표에 소속된 팀이 없습니다." />
+          )}
         </div>
       </MobilePanel>
 
@@ -4810,6 +4992,9 @@ function ReservationDetailPanel({
                     >
                       {isMine ? "내 팀" : "다른 팀"}
                     </span>
+                    {reservation.location === "external" && (
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">외부</span>
+                    )}
                   </div>
                   <p className="text-[10px] leading-4 text-slate-500">
                     대표자 {reservation.leaderName}

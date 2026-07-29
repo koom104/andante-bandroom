@@ -116,6 +116,7 @@ create table if not exists public.bookings (
   ),
   duration numeric(4,1) not null check (duration > 0 and duration * 2 = floor(duration * 2)),
   purpose text not null,
+  booking_location text not null default 'club_room' check (booking_location in ('club_room', 'external')),
   status text not null default 'confirmed' check (status in ('confirmed', 'cancelled')),
   created_by uuid references public.profiles(id),
   cancelled_by uuid references public.profiles(id),
@@ -253,12 +254,15 @@ begin
     + split_part(new.start_time, ':', 2)::integer;
   requested_end := requested_start + (new.duration * 60)::integer;
 
-  perform pg_advisory_xact_lock(hashtext('booking:' || new.booking_date::text));
+  if new.booking_location = 'club_room' then
+    perform pg_advisory_xact_lock(hashtext('booking:' || new.booking_date::text));
+  end if;
 
-  if new.status = 'confirmed' and exists (
+  if new.status = 'confirmed' and new.booking_location = 'club_room' and exists (
     select 1
     from public.bookings b
     where b.status = 'confirmed'
+      and b.booking_location = 'club_room'
       and b.booking_date = new.booking_date
       and (split_part(b.start_time, ':', 1)::integer * 60 + split_part(b.start_time, ':', 2)::integer) < requested_end
       and (split_part(b.start_time, ':', 1)::integer * 60 + split_part(b.start_time, ':', 2)::integer)
@@ -1170,7 +1174,8 @@ create or replace function public.create_booking(
   p_start_time text,
   p_duration numeric,
   p_purpose text,
-  p_booking_date date default null
+  p_booking_date date,
+  p_location text
 )
 returns uuid
 language plpgsql
@@ -1189,6 +1194,10 @@ begin
 
   if not (public.is_admin(auth.uid()) or public.is_team_leader(p_team_id, auth.uid())) then
     raise exception '팀장만 해당 팀 예약을 만들 수 있습니다.';
+  end if;
+
+  if p_location not in ('club_room', 'external') then
+    raise exception '합주 장소가 올바르지 않습니다.';
   end if;
 
   if p_day not in ('월', '화', '수', '목', '금', '토', '일') then
@@ -1231,11 +1240,12 @@ begin
     raise exception '24시 이후로 끝나는 예약은 만들 수 없습니다.';
   end if;
 
-  if exists (
+  if p_location = 'club_room' and exists (
     select 1
     from public.bookings
     where day_of_week = p_day
       and status = 'confirmed'
+      and booking_location = 'club_room'
       and (p_booking_date is null or booking_date is null or booking_date = p_booking_date)
       and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) < requested_end
       and (split_part(start_time, ':', 1)::integer * 60 + split_part(start_time, ':', 2)::integer) + (duration * 60)::integer > requested_start
@@ -1250,6 +1260,7 @@ begin
     start_time,
     duration,
     purpose,
+    booking_location,
     created_by
   )
   values (
@@ -1259,18 +1270,49 @@ begin
     p_start_time,
     p_duration,
     coalesce(nullif(trim(p_purpose), ''), '합주 예약'),
+    p_location,
     auth.uid()
   )
   returning id into new_booking_id;
 
   insert into public.audit_logs (actor_id, action, target_type, target_id, reason)
-  values (auth.uid(), 'create_booking', 'booking', new_booking_id, coalesce(p_booking_date::text, p_day) || ' ' || p_start_time);
+  values (
+    auth.uid(),
+    'create_booking',
+    'booking',
+    new_booking_id,
+    coalesce(p_booking_date::text, p_day) || ' ' || p_start_time || ' ' || p_location
+  );
 
   return new_booking_id;
 end;
 $$;
 
-create or replace function public.create_bookings(
+create or replace function public.create_booking(
+  p_team_id uuid,
+  p_day text,
+  p_start_time text,
+  p_duration numeric,
+  p_purpose text,
+  p_booking_date date default null
+)
+returns uuid
+language sql
+security definer
+set search_path = public
+as $$
+  select public.create_booking(
+    p_team_id,
+    p_day,
+    p_start_time,
+    p_duration,
+    p_purpose,
+    p_booking_date,
+    'club_room'
+  );
+$$;
+
+create or replace function public.create_bookings_with_location(
   p_team_id uuid,
   p_day text,
   p_booking_date date,
@@ -1288,6 +1330,7 @@ declare
   new_booking_ids uuid[] := '{}';
   group_start_time text;
   group_duration numeric;
+  group_location text;
 begin
   if p_groups is null or jsonb_typeof(p_groups) <> 'array' or jsonb_array_length(p_groups) = 0 then
     raise exception '예약할 시간대가 없습니다.';
@@ -1297,6 +1340,7 @@ begin
   loop
     group_start_time := group_item->>'start_time';
     group_duration := (group_item->>'duration')::numeric;
+    group_location := coalesce(nullif(group_item->>'location', ''), 'club_room');
 
     new_booking_id := public.create_booking(
       p_team_id,
@@ -1304,7 +1348,8 @@ begin
       group_start_time,
       group_duration,
       p_purpose,
-      p_booking_date
+      p_booking_date,
+      group_location
     );
     new_booking_ids := array_append(new_booking_ids, new_booking_id);
   end loop;
@@ -1806,7 +1851,8 @@ grant execute on function public.get_my_push_subscriptions() to authenticated;
 grant execute on function public.disable_my_push_subscription(uuid) to authenticated;
 grant execute on function public.claim_booking_push_targets(uuid[], text) to authenticated;
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date) to authenticated;
-grant execute on function public.create_bookings(uuid, text, date, text, jsonb) to authenticated;
+grant execute on function public.create_booking(uuid, text, text, numeric, text, date, text) to authenticated;
+grant execute on function public.create_bookings_with_location(uuid, text, date, text, jsonb) to authenticated;
 grant execute on function public.cancel_booking(uuid, text) to authenticated;
 grant select, insert, update, delete on public.member_schedules to authenticated;
 grant select, insert, update, delete on public.member_schedule_date_slots to authenticated;
@@ -1841,7 +1887,8 @@ revoke all on function public.get_my_push_subscriptions() from public;
 revoke all on function public.disable_my_push_subscription(uuid) from public;
 revoke all on function public.claim_booking_push_targets(uuid[], text) from public;
 revoke all on function public.create_booking(uuid, text, text, numeric, text, date) from public;
-revoke all on function public.create_bookings(uuid, text, date, text, jsonb) from public;
+revoke all on function public.create_booking(uuid, text, text, numeric, text, date, text) from public;
+revoke all on function public.create_bookings_with_location(uuid, text, date, text, jsonb) from public;
 revoke all on function public.cancel_booking(uuid, text) from public;
 
 grant usage on schema public to service_role;
