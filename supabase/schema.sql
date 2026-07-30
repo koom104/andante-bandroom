@@ -69,7 +69,7 @@ create table if not exists public.club_room_status (
 );
 
 create table if not exists public.team_members (
-  team_id uuid not null references public.teams(id) on delete cascade,
+  team_id uuid references public.teams(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   session text not null check (session in ('보컬', '리드기타', '리듬기타', '어쿠스틱', '베이스', '드럼', '피아노', '신디')),
   is_leader boolean not null default false,
@@ -117,6 +117,10 @@ create table if not exists public.bookings (
   duration numeric(4,1) not null check (duration > 0 and duration * 2 = floor(duration * 2)),
   purpose text not null,
   booking_location text not null default 'club_room' check (booking_location in ('club_room', 'external')),
+  booking_type text not null default 'rehearsal' check (
+    (booking_type = 'rehearsal' and team_id is not null)
+    or (booking_type = 'room_block' and team_id is null and booking_location = 'club_room')
+  ),
   status text not null default 'confirmed' check (status in ('confirmed', 'cancelled')),
   created_by uuid references public.profiles(id),
   cancelled_by uuid references public.profiles(id),
@@ -1066,6 +1070,7 @@ as $$
     left join public.bookings b
       on b.id = bas.booking_id
       and b.status = 'confirmed'
+      and b.booking_type = 'rehearsal'
       and b.booking_date < current_date
       and b.booking_date >= coalesce(
         (select count_from_date from public.rehearsal_tracking_settings where id = 1),
@@ -1108,6 +1113,7 @@ as $$
       from public.bookings b
       where b.team_id = t.id
         and b.status = 'confirmed'
+        and b.booking_type = 'rehearsal'
         and b.booking_date < current_date
         and b.booking_date >= coalesce(
           (select count_from_date from public.rehearsal_tracking_settings where id = 1),
@@ -1122,6 +1128,7 @@ as $$
         join public.bookings b on b.id = bas.booking_id
         where b.team_id = t.id
           and b.status = 'confirmed'
+          and b.booking_type = 'rehearsal'
           and b.booking_date < current_date
           and b.booking_date >= coalesce(
             (select count_from_date from public.rehearsal_tracking_settings where id = 1),
@@ -1358,6 +1365,141 @@ begin
 end;
 $$;
 
+create or replace function public.create_room_blocks(
+  p_day text,
+  p_booking_date date,
+  p_reason text,
+  p_groups jsonb
+)
+returns uuid[]
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  group_item jsonb;
+  new_booking_id uuid;
+  new_booking_ids uuid[] := '{}';
+  group_start_time text;
+  group_duration numeric;
+  date_day text;
+begin
+  if not public.is_super_admin(auth.uid()) then
+    raise exception '최고 관리자만 동아리방 사용 제한을 등록할 수 있습니다.';
+  end if;
+
+  if p_day not in ('월', '화', '수', '목', '금', '토', '일') then
+    raise exception '예약 요일이 올바르지 않습니다.';
+  end if;
+
+  date_day := case extract(dow from p_booking_date)::integer
+    when 0 then '일'
+    when 1 then '월'
+    when 2 then '화'
+    when 3 then '수'
+    when 4 then '목'
+    when 5 then '금'
+    when 6 then '토'
+  end;
+
+  if date_day <> p_day then
+    raise exception '예약 날짜와 요일이 일치하지 않습니다.';
+  end if;
+
+  if char_length(trim(coalesce(p_reason, ''))) not between 1 and 120 then
+    raise exception '사용 제한 사유를 120자 이내로 입력해 주세요.';
+  end if;
+
+  if p_groups is null or jsonb_typeof(p_groups) <> 'array' or jsonb_array_length(p_groups) = 0 then
+    raise exception '사용을 제한할 시간대를 선택해 주세요.';
+  end if;
+
+  for group_item in select value from jsonb_array_elements(p_groups)
+  loop
+    group_start_time := group_item->>'start_time';
+    group_duration := (group_item->>'duration')::numeric;
+
+    if group_start_time !~ '^(1[0-9]|2[0-3]):(00|30)$'
+      or group_duration is null
+      or group_duration <= 0
+      or group_duration * 2 <> floor(group_duration * 2)
+    then
+      raise exception '사용 제한 시간이 올바르지 않습니다.';
+    end if;
+
+    insert into public.bookings (
+      team_id,
+      booking_date,
+      day_of_week,
+      start_time,
+      duration,
+      purpose,
+      booking_location,
+      booking_type,
+      created_by
+    )
+    values (
+      null,
+      p_booking_date,
+      p_day,
+      group_start_time,
+      group_duration,
+      trim(p_reason),
+      'club_room',
+      'room_block',
+      auth.uid()
+    )
+    returning id into new_booking_id;
+
+    new_booking_ids := array_append(new_booking_ids, new_booking_id);
+  end loop;
+
+  insert into public.audit_logs (actor_id, action, target_type, reason)
+  values (
+    auth.uid(),
+    'create_room_blocks',
+    'booking',
+    p_booking_date::text || ' ' || trim(p_reason)
+  );
+
+  return new_booking_ids;
+end;
+$$;
+
+create or replace function public.get_push_subscription_status()
+returns table (
+  user_id uuid,
+  name text,
+  cohort text,
+  has_push boolean,
+  registered_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    p.id,
+    p.name,
+    p.cohort,
+    (active_subscription.updated_at is not null) as has_push,
+    active_subscription.updated_at
+  from public.profiles p
+  left join lateral (
+    select ps.updated_at
+    from public.push_subscriptions ps
+    where ps.user_id = p.id
+      and ps.disabled_at is null
+    order by ps.updated_at desc
+    limit 1
+  ) active_subscription on true
+  where p.status = 'approved'
+    and p.role <> 'admin'
+    and public.is_super_admin(auth.uid())
+  order by p.cohort asc, p.name asc;
+$$;
+
 create or replace function public.is_member_available_for_booking(
   p_user_id uuid,
   p_booking_date date,
@@ -1428,7 +1570,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if new.status <> 'confirmed' then
+  if new.status <> 'confirmed' or new.booking_type <> 'rehearsal' then
     return new;
   end if;
 
@@ -1456,7 +1598,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if new.status <> 'confirmed' then
+  if new.status <> 'confirmed' or new.booking_type <> 'rehearsal' then
     return new;
   end if;
 
@@ -1534,7 +1676,13 @@ begin
     return target_booking.id;
   end if;
 
-  if not (public.is_admin(auth.uid()) or public.is_team_leader(target_booking.team_id, auth.uid())) then
+  if target_booking.booking_type = 'room_block' and not public.is_super_admin(auth.uid()) then
+    raise exception '최고 관리자만 동아리방 사용 제한을 취소할 수 있습니다.';
+  end if;
+
+  if target_booking.booking_type <> 'room_block'
+    and not (public.is_admin(auth.uid()) or public.is_team_leader(target_booking.team_id, auth.uid()))
+  then
     raise exception '관리자 또는 해당 팀의 팀장만 예약을 취소할 수 있습니다.';
   end if;
 
@@ -1853,6 +2001,8 @@ grant execute on function public.claim_booking_push_targets(uuid[], text) to aut
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date) to authenticated;
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date, text) to authenticated;
 grant execute on function public.create_bookings_with_location(uuid, text, date, text, jsonb) to authenticated;
+grant execute on function public.create_room_blocks(text, date, text, jsonb) to authenticated;
+grant execute on function public.get_push_subscription_status() to authenticated;
 grant execute on function public.cancel_booking(uuid, text) to authenticated;
 grant select, insert, update, delete on public.member_schedules to authenticated;
 grant select, insert, update, delete on public.member_schedule_date_slots to authenticated;
@@ -1889,6 +2039,8 @@ revoke all on function public.claim_booking_push_targets(uuid[], text) from publ
 revoke all on function public.create_booking(uuid, text, text, numeric, text, date) from public;
 revoke all on function public.create_booking(uuid, text, text, numeric, text, date, text) from public;
 revoke all on function public.create_bookings_with_location(uuid, text, date, text, jsonb) from public;
+revoke all on function public.create_room_blocks(text, date, text, jsonb) from public;
+revoke all on function public.get_push_subscription_status() from public;
 revoke all on function public.cancel_booking(uuid, text) from public;
 
 grant usage on schema public to service_role;

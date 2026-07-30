@@ -24,6 +24,7 @@ type ScheduleColumn = {
 
 type ScheduleScope = "weekly" | "date";
 type BookingLocation = "club_room" | "external";
+type BookingType = "rehearsal" | "room_block";
 
 type Profile = {
   id: string;
@@ -68,6 +69,14 @@ type GoalCategory = {
   created_at?: string;
 };
 
+type PushSubscriptionStatus = {
+  userId: string;
+  name: string;
+  cohort: string;
+  hasPush: boolean;
+  registeredAt?: string | null;
+};
+
 type Reservation = {
   id: string;
   teamId: string;
@@ -83,6 +92,7 @@ type Reservation = {
   purpose: string;
   status: "confirmed" | "cancelled";
   location: BookingLocation;
+  bookingType: BookingType;
   attendanceUserIds?: string[];
 };
 
@@ -778,6 +788,7 @@ export default function Home() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rehearsalLeaderboardRows, setRehearsalLeaderboardRows] = useState<RehearsalRankRow[]>([]);
   const [teamRehearsalTotals, setTeamRehearsalTotals] = useState<Record<string, TeamRehearsalTotal>>({});
+  const [pushSubscriptionStatuses, setPushSubscriptionStatuses] = useState<PushSubscriptionStatus[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedBookingGoal, setSelectedBookingGoal] = useState("");
   const [selectedBookingLocation, setSelectedBookingLocation] = useState<BookingLocation | "">("");
@@ -888,6 +899,7 @@ export default function Home() {
       clubRoomStatusResult,
       rehearsalLeaderboardResult,
       teamRehearsalTotalsResult,
+      pushSubscriptionStatusResult,
     ] = await Promise.all([
       profileRequest,
       supabase.from("teams").select("*").order("created_at", { ascending: true }),
@@ -897,6 +909,9 @@ export default function Home() {
       supabase.from("club_room_status").select("*").eq("id", 1).maybeSingle(),
       supabase.rpc("get_rehearsal_leaderboard"),
       supabase.rpc("get_team_rehearsal_totals"),
+      isSuperAdmin(profile)
+        ? supabase.rpc("get_push_subscription_status")
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     const firstError = [profileResult, teamResult, memberResult, bookingResult].find((result) => result.error)?.error;
@@ -936,6 +951,14 @@ export default function Home() {
     const teamRehearsalTotalsError = teamRehearsalTotalsResult.error ? getErrorMessage(teamRehearsalTotalsResult.error) : "";
     if (teamRehearsalTotalsError && !isMissingSchemaError(teamRehearsalTotalsError)) {
       setDbError(teamRehearsalTotalsError);
+      setIsLoadingData(false);
+      return;
+    }
+    const pushSubscriptionStatusError = pushSubscriptionStatusResult.error
+      ? getErrorMessage(pushSubscriptionStatusResult.error)
+      : "";
+    if (pushSubscriptionStatusError && !isMissingSchemaError(pushSubscriptionStatusError)) {
+      setDbError(pushSubscriptionStatusError);
       setIsLoadingData(false);
       return;
     }
@@ -1041,7 +1064,7 @@ export default function Home() {
     const nextTeams = allTeams.filter((team) => canUseAdminTab(profile) || team.members.some((member) => member.id === profile.id));
     const bookingRows = (bookingResult.data ?? []) as Array<{
       id: string;
-      team_id: string;
+      team_id: string | null;
       booking_date: string | null;
       day_of_week: Day;
       start_time: string;
@@ -1049,6 +1072,7 @@ export default function Home() {
       purpose: string;
       status: "confirmed" | "cancelled";
       booking_location?: BookingLocation | null;
+      booking_type?: BookingType | null;
     }>;
     const bookingIds = bookingRows.map((booking) => booking.id);
     const bookingAttendanceResult =
@@ -1069,15 +1093,16 @@ export default function Home() {
     }
 
     const nextReservations = bookingRows.map((booking) => {
-      const team = teamById.get(booking.team_id);
+      const team = booking.team_id ? teamById.get(booking.team_id) : undefined;
       const leader = team?.members.find((member) => member.id === team.leaderId);
+      const bookingType = booking.booking_type === "room_block" ? "room_block" : "rehearsal";
 
       return {
         id: booking.id,
-        teamId: booking.team_id,
-        teamName: team?.name ?? "삭제된 팀",
+        teamId: booking.team_id ?? "",
+        teamName: bookingType === "room_block" ? "동아리방 사용 제한" : team?.name ?? "삭제된 팀",
         teamSong: team?.song ?? "",
-        leaderName: leader?.name ?? "-",
+        leaderName: bookingType === "room_block" ? "최고 관리자" : leader?.name ?? "-",
         leaderRole: leader?.role,
         memberCount: team?.members.length ?? 0,
         bookingDate: booking.booking_date,
@@ -1087,6 +1112,7 @@ export default function Home() {
         purpose: booking.purpose,
         status: booking.status,
         location: booking.booking_location === "external" ? "external" : "club_room",
+        bookingType,
         attendanceUserIds: bookingAttendanceError ? undefined : attendanceByBooking.get(booking.id) ?? [],
       };
     });
@@ -1121,6 +1147,21 @@ export default function Home() {
           },
         ]),
     );
+    const nextPushSubscriptionStatuses = pushSubscriptionStatusError
+      ? []
+      : ((pushSubscriptionStatusResult.data ?? []) as Array<{
+          user_id: string;
+          name: string;
+          cohort: string;
+          has_push: boolean;
+          registered_at: string | null;
+        }>).map((row) => ({
+          userId: row.user_id,
+          name: row.name,
+          cohort: row.cohort,
+          hasPush: row.has_push,
+          registeredAt: row.registered_at,
+        }));
     const rehearsalMap: Record<string, string[]> = {};
     for (const booking of nextReservations) {
       if (booking.status !== "confirmed") {
@@ -1158,6 +1199,7 @@ export default function Home() {
     setRehearsalByUser(rehearsalMap);
     setRehearsalLeaderboardRows(nextRehearsalLeaderboardRows);
     setTeamRehearsalTotals(nextTeamRehearsalTotals);
+    setPushSubscriptionStatuses(nextPushSubscriptionStatuses);
     setAllTeams(allTeams);
     setTeams(nextTeams);
     setReservations(nextReservations);
@@ -1197,6 +1239,7 @@ export default function Home() {
         setRehearsalByUser({});
         setRehearsalLeaderboardRows([]);
         setTeamRehearsalTotals({});
+        setPushSubscriptionStatuses([]);
         setReservations([]);
         setIsBooting(false);
       }
@@ -1827,6 +1870,35 @@ export default function Home() {
     await refreshData();
   }
 
+  async function createRoomBlocks(date: string, reason: string, times: string[]) {
+    if (!isSuperAdmin(profile)) {
+      throw new Error("최고 관리자만 동아리방 사용 제한을 등록할 수 있습니다.");
+    }
+
+    const bookingGroups = groupBookingTimes(times);
+    const { error } = await supabase.rpc("create_room_blocks", {
+      p_day: dateToDay(date),
+      p_booking_date: date,
+      p_reason: reason,
+      p_groups: bookingGroups.map((group) => ({
+        start_time: group.start,
+        duration: group.duration,
+      })),
+    });
+
+    if (error) {
+      const message = getErrorMessage(error);
+      if (message.includes("create_room_blocks") || message.includes("booking_type")) {
+        throw new Error("Supabase SQL Editor에서 patch-030-admin-room-blocks.sql을 먼저 실행해 주세요.");
+      }
+      throw new Error(message);
+    }
+
+    const groupText = bookingGroups.map((group) => `${group.start}-${group.end}`).join(", ");
+    setStatus(`${formatDateLabel(date)} ${groupText} 동아리방 사용 제한을 등록했어요.`);
+    await refreshData();
+  }
+
   async function approveProfile(profileId: string, nextStatus: "approved" | "rejected") {
     if (!profile) {
       return;
@@ -2209,6 +2281,7 @@ export default function Home() {
                     allTeams={allTeams}
                     goalCategories={goalCategories}
                     reservations={upcomingReservations.filter((reservation) => !isReservationPast(reservation))}
+                    pushSubscriptionStatuses={pushSubscriptionStatuses}
                     busyByUser={busyByUser}
                     dateBusyByUser={dateBusyByUser}
                     dateOverrideByUser={dateOverrideByUser}
@@ -2217,6 +2290,7 @@ export default function Home() {
                     updateProfileRole={updateProfileRole}
                     resetMemberPassword={resetMemberPassword}
                     resetRehearsalTracking={resetRehearsalTracking}
+                    createRoomBlocks={createRoomBlocks}
                     addGoalCategory={addGoalCategory}
                     deleteGoalCategory={deleteGoalCategory}
                     addTeam={addTeam}
@@ -2929,7 +3003,11 @@ function CalendarTab({
                         className="block truncate rounded-sm border border-[#efc9c1] bg-[#fff8f4] px-0.5 py-0.5 text-[9px] font-semibold leading-3 text-[#a84037]"
                         title={`${reservation.start} ${reservation.teamName}`}
                       >
-                        {reservation.location === "external" ? `${reservation.teamName} · 외부` : reservation.teamName}
+                        {reservation.bookingType === "room_block"
+                          ? "사용 제한"
+                          : reservation.location === "external"
+                            ? `${reservation.teamName} · 외부`
+                            : reservation.teamName}
                       </span>
                     ))}
                     {dayReservations.length > 4 && (
@@ -4174,6 +4252,7 @@ function AdminTab({
   allTeams,
   goalCategories,
   reservations,
+  pushSubscriptionStatuses,
   busyByUser,
   dateBusyByUser,
   dateOverrideByUser,
@@ -4182,6 +4261,7 @@ function AdminTab({
   updateProfileRole,
   resetMemberPassword,
   resetRehearsalTracking,
+  createRoomBlocks,
   addGoalCategory,
   deleteGoalCategory,
   addTeam,
@@ -4197,6 +4277,7 @@ function AdminTab({
   allTeams: Team[];
   goalCategories: GoalCategory[];
   reservations: Reservation[];
+  pushSubscriptionStatuses: PushSubscriptionStatus[];
   busyByUser: Record<string, string[]>;
   dateBusyByUser: Record<string, Record<string, string[]>>;
   dateOverrideByUser: Record<string, string[]>;
@@ -4205,6 +4286,7 @@ function AdminTab({
   updateProfileRole: (profileId: string, nextRole: "member" | "manager") => Promise<void>;
   resetMemberPassword: (profileId: string) => Promise<string>;
   resetRehearsalTracking: () => Promise<string>;
+  createRoomBlocks: (date: string, reason: string, times: string[]) => Promise<void>;
   addGoalCategory: (name: string) => Promise<void>;
   deleteGoalCategory: (categoryId: string) => Promise<void>;
   addTeam: (payload: NewTeamPayload) => Promise<void>;
@@ -4260,6 +4342,9 @@ function AdminTab({
 
       {isSuperAdmin(currentProfile) && (
         <>
+          <AdminRoomBlockPanel reservations={reservations} onCreate={createRoomBlocks} />
+          <PushSubscriptionStatusPanel statuses={pushSubscriptionStatuses} />
+
           <MobilePanel title="집기 권한 관리">
             <div className="space-y-3">
             <ProfileSearchPicker
@@ -4414,6 +4499,9 @@ function AdminTab({
                   {reservation.bookingDate ? formatDateLabel(reservation.bookingDate) : `${reservation.day}요일`} {reservation.start} ·{" "}
                   {formatDuration(reservation.duration)}
                 </p>
+                {reservation.bookingType === "room_block" && (
+                  <p className="mt-1 text-[11px] text-amber-700">{reservation.purpose}</p>
+                )}
               </div>
               <button
                 type="button"
@@ -4448,6 +4536,275 @@ function AdminTab({
       <AdminTeamManager allTeams={allTeams} approvedProfiles={approvedProfiles} goalCategories={goalCategories} onAddTeam={addTeam} onUpdateTeam={updateTeam} />
 
     </div>
+  );
+}
+
+function PushSubscriptionStatusPanel({ statuses }: { statuses: PushSubscriptionStatus[] }) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredStatuses = normalizedQuery
+    ? statuses.filter((item) => `${item.name} ${item.cohort}`.toLowerCase().includes(normalizedQuery))
+    : statuses;
+  const activeCount = statuses.filter((item) => item.hasPush).length;
+
+  return (
+    <MobilePanel title="푸시 알림 등록 현황">
+      <div className="grid grid-cols-2 gap-2">
+        <ProfileStat label="알림 등록" value={`${activeCount}명`} />
+        <ProfileStat label="미등록" value={`${Math.max(0, statuses.length - activeCount)}명`} />
+      </div>
+
+      <input
+        type="search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="이름 또는 기수 검색"
+        className="mt-3 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none focus:border-[#ff665a]"
+      />
+
+      <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-[#f0ded7] bg-white">
+        {filteredStatuses.map((item) => (
+          <div key={item.userId} className="flex items-center justify-between gap-3 border-b border-[#f7e8e2] px-3 py-2 last:border-b-0">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{item.name} · {item.cohort}</p>
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                {item.hasPush ? `마지막 등록 ${formatUpdatedAt(item.registeredAt)}` : "등록된 기기 없음"}
+              </p>
+            </div>
+            <span
+              className={`shrink-0 rounded px-2 py-1 text-[10px] font-semibold ${
+                item.hasPush ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {item.hasPush ? "등록" : "미등록"}
+            </span>
+          </div>
+        ))}
+        {filteredStatuses.length === 0 && <p className="px-3 py-4 text-center text-xs text-slate-500">표시할 부원이 없습니다.</p>}
+      </div>
+    </MobilePanel>
+  );
+}
+
+function AdminRoomBlockPanel({
+  reservations,
+  onCreate,
+}: {
+  reservations: Reservation[];
+  onCreate: (date: string, reason: string, times: string[]) => Promise<void>;
+}) {
+  const [selectedDate, setSelectedDate] = useState(todayISO());
+  const [selectedBand, setSelectedBand] = useState(timeBands[0].id);
+  const [reasonPreset, setReasonPreset] = useState("");
+  const [customReason, setCustomReason] = useState("");
+  const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const activeBand = timeBands.find((band) => band.id === selectedBand) ?? timeBands[0];
+  const visibleTimes = timeSlots.filter((time) => {
+    const minutes = timeToMinutes(time);
+    return minutes >= activeBand.start && minutes < activeBand.end;
+  });
+  const occupiedTimes = new Set(
+    timeSlots.filter((time) =>
+      reservations.some(
+        (reservation) =>
+          reservation.status === "confirmed" &&
+          reservation.location === "club_room" &&
+          isReserved(reservation, selectedDate, time),
+      ),
+    ),
+  );
+  const reason = reasonPreset === "기타" ? customReason.trim() : reasonPreset;
+  const selectedGroups = groupBookingTimes(selectedTimes);
+
+  function changeDate(date: string) {
+    setSelectedDate(date);
+    setSelectedTimes([]);
+    setIsConfirming(false);
+    setMessage("");
+  }
+
+  function toggleTime(time: string) {
+    if (occupiedTimes.has(time)) {
+      return;
+    }
+
+    setSelectedTimes((current) =>
+      current.includes(time)
+        ? current.filter((item) => item !== time)
+        : [...current, time].sort((left, right) => timeToMinutes(left) - timeToMinutes(right)),
+    );
+    setIsConfirming(false);
+    setMessage("");
+  }
+
+  async function submitRoomBlock() {
+    if (!reason || selectedTimes.length === 0) {
+      return;
+    }
+
+    setIsSaving(true);
+    setMessage("");
+
+    try {
+      await onCreate(selectedDate, reason, selectedTimes);
+      setSelectedTimes([]);
+      setIsConfirming(false);
+      setReasonPreset("");
+      setCustomReason("");
+      setMessage("동아리방 사용 제한을 등록했습니다.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <MobilePanel title="동아리방 사용 제한">
+      <p className="text-xs leading-5 text-slate-600">
+        유지 보수나 장비 문제로 사용할 수 없는 시간을 막습니다. 이 일정은 합주시간에 포함되지 않습니다.
+      </p>
+
+      <div className="mt-3">
+        <ThreeWeekCalendar
+          selectedDate={selectedDate}
+          onSelectDate={changeDate}
+          hasMarker={(date) =>
+            reservations.some(
+              (reservation) =>
+                reservation.status === "confirmed" &&
+                reservation.location === "club_room" &&
+                reservationMatchesDate(reservation, date),
+            )
+          }
+          compact
+        />
+      </div>
+
+      <label className="mt-3 block">
+        <span className="text-xs font-semibold text-slate-500">사용 제한 사유</span>
+        <select
+          value={reasonPreset}
+          onChange={(event) => {
+            setReasonPreset(event.target.value);
+            setIsConfirming(false);
+            setMessage("");
+          }}
+          className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none focus:border-[#ff665a]"
+        >
+          <option value="">사유를 선택해 주세요</option>
+          <option value="동아리방 유지 보수">동아리방 유지 보수</option>
+          <option value="장비 점검 및 문제">장비 점검 및 문제</option>
+          <option value="동아리 운영">동아리 운영</option>
+          <option value="기타">기타</option>
+        </select>
+      </label>
+
+      {reasonPreset === "기타" && (
+        <input
+          type="text"
+          value={customReason}
+          onChange={(event) => {
+            setCustomReason(event.target.value);
+            setIsConfirming(false);
+            setMessage("");
+          }}
+          maxLength={120}
+          placeholder="사용할 수 없는 이유"
+          className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none focus:border-[#ff665a]"
+        />
+      )}
+
+      <div className="mt-3 grid grid-cols-4 gap-1.5">
+        {timeBands.map((band) => (
+          <button
+            key={band.id}
+            type="button"
+            onClick={() => setSelectedBand(band.id)}
+            className={`h-10 rounded-lg border text-xs font-semibold ${
+              selectedBand === band.id
+                ? "border-slate-950 bg-slate-950 text-white"
+                : "border-[#f0ded7] bg-white text-slate-600"
+            }`}
+          >
+            <span className="block">{band.label}</span>
+            <span className={`block text-[10px] ${selectedBand === band.id ? "text-white/70" : "text-slate-400"}`}>{band.range}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-2 grid grid-cols-4 gap-1.5">
+        {visibleTimes.map((time) => {
+          const isOccupied = occupiedTimes.has(time);
+          const isSelected = selectedTimes.includes(time);
+
+          return (
+            <button
+              key={time}
+              type="button"
+              onClick={() => toggleTime(time)}
+              disabled={isOccupied}
+              className={`h-10 rounded-md border text-[11px] font-semibold ${
+                isOccupied
+                  ? "border-slate-100 bg-slate-100 text-slate-400"
+                  : isSelected
+                    ? "border-[#ff8c81] bg-[#fff0eb] text-[#be3d33]"
+                    : "border-[#f0ded7] bg-white text-slate-700"
+              }`}
+            >
+              <span className="block">{time}</span>
+              {isOccupied && <span className="block text-[9px]">예약</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedGroups.length > 0 && (
+        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+          선택: {selectedGroups.map((group) => `${group.start}-${group.end}`).join(", ")}
+        </p>
+      )}
+
+      {message && <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{message}</p>}
+
+      {!isConfirming ? (
+        <button
+          type="button"
+          onClick={() => setIsConfirming(true)}
+          disabled={!reason || selectedTimes.length === 0}
+          className="mt-3 h-10 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
+        >
+          사용 제한 등록
+        </button>
+      ) : (
+        <div className="mt-3 rounded-lg bg-[#fff0eb] p-3">
+          <p className="text-xs font-semibold leading-5 text-[#9f3029]">
+            {formatDateLabel(selectedDate)} 선택 시간에 동아리방 예약을 막을까요?
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setIsConfirming(false)}
+              disabled={isSaving}
+              className="h-9 rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-600"
+            >
+              돌아가기
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitRoomBlock()}
+              disabled={isSaving}
+              className="h-9 rounded-lg bg-[#ff665a] text-xs font-semibold text-white disabled:bg-slate-200"
+            >
+              {isSaving ? "등록 중" : "등록 확정"}
+            </button>
+          </div>
+        </div>
+      )}
+    </MobilePanel>
   );
 }
 
@@ -4973,12 +5330,17 @@ function ReservationDetailPanel({
       <div className="space-y-1">
         {dayReservations.map((reservation) => {
           const isMine = ownTeamIds.has(reservation.teamId);
+          const isRoomBlock = reservation.bookingType === "room_block";
 
           return (
             <article
               key={reservation.id}
               className={`rounded-md border p-2 ${
-                isMine ? "border-[#ffb3aa] bg-[#fff8f4]" : "border-[#f0ded7] bg-white"
+                isRoomBlock
+                  ? "border-amber-200 bg-amber-50/70"
+                  : isMine
+                    ? "border-[#ffb3aa] bg-[#fff8f4]"
+                    : "border-[#f0ded7] bg-white"
               }`}
             >
               <div className="flex items-start justify-between gap-2">
@@ -4987,18 +5349,23 @@ function ReservationDetailPanel({
                     <h4 className="truncate text-[13px] font-semibold leading-4">{reservation.teamName}</h4>
                     <span
                       className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
-                        isMine ? "bg-[#ff665a] text-white" : "bg-slate-100 text-slate-600"
+                        isRoomBlock
+                          ? "bg-amber-100 text-amber-800"
+                          : isMine
+                            ? "bg-[#ff665a] text-white"
+                            : "bg-slate-100 text-slate-600"
                       }`}
                     >
-                      {isMine ? "내 팀" : "다른 팀"}
+                      {isRoomBlock ? "사용 제한" : isMine ? "내 팀" : "다른 팀"}
                     </span>
-                    {reservation.location === "external" && (
+                    {!isRoomBlock && reservation.location === "external" && (
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">외부</span>
                     )}
                   </div>
                   <p className="text-[10px] leading-4 text-slate-500">
-                    대표자 {reservation.leaderName}
-                    {reservation.leaderRole ? ` · ${reservation.leaderRole}` : ""}
+                    {isRoomBlock
+                      ? "최고 관리자 등록"
+                      : `대표자 ${reservation.leaderName}${reservation.leaderRole ? ` · ${reservation.leaderRole}` : ""}`}
                   </p>
                 </div>
                 <div className="flex w-[92px] shrink-0 items-center justify-center rounded bg-slate-950 px-2 py-1.5 text-center text-white">
@@ -5011,10 +5378,12 @@ function ReservationDetailPanel({
               <div className="mt-px flex items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4">
                   <span><strong className="text-slate-500">길이</strong> {formatDuration(reservation.duration)}</span>
-                  <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>
+                  {!isRoomBlock && (
+                    <span><strong className="text-slate-500">멤버</strong> {reservation.memberCount > 0 ? `${reservation.memberCount}명` : "-"}</span>
+                  )}
                 </div>
                 <p className="w-[92px] shrink-0 truncate text-center text-[10px] leading-4 text-slate-500">
-                  {reservation.purpose || reservation.teamSong || "합주 예약"}
+                  {reservation.purpose || reservation.teamSong || (isRoomBlock ? "사용 제한" : "합주 예약")}
                 </p>
               </div>
 
