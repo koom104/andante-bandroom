@@ -1217,17 +1217,49 @@ export default function Home() {
 
   useEffect(() => {
     let mounted = true;
+    let recoveryPromise: Promise<void> | null = null;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) {
-        return;
+    const recoverSession = () => {
+      if (recoveryPromise) {
+        return recoveryPromise;
       }
 
-      setSession(data.session);
-      if (!data.session) {
-        setIsBooting(false);
+      recoveryPromise = (async () => {
+        const { data } = await supabase.auth.getSession();
+        let nextSession = data.session;
+
+        if (nextSession?.expires_at && nextSession.expires_at * 1000 <= Date.now() + 5 * 60 * 1000) {
+          const { data: refreshedData, error } = await supabase.auth.refreshSession();
+          if (!error && refreshedData.session) {
+            nextSession = refreshedData.session;
+          }
+        }
+
+        if (!mounted) {
+          return;
+        }
+
+        setSession(nextSession);
+        if (!nextSession) {
+          setIsBooting(false);
+        }
+      })().finally(() => {
+        recoveryPromise = null;
+      });
+
+      return recoveryPromise;
+    };
+
+    const recoverVisibleSession = () => {
+      if (document.visibilityState === "visible") {
+        void recoverSession();
       }
-    });
+    };
+
+    void recoverSession();
+    window.addEventListener("online", recoverVisibleSession);
+    window.addEventListener("pageshow", recoverVisibleSession);
+    document.addEventListener("visibilitychange", recoverVisibleSession);
 
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
@@ -1256,6 +1288,9 @@ export default function Home() {
 
     return () => {
       mounted = false;
+      window.removeEventListener("online", recoverVisibleSession);
+      window.removeEventListener("pageshow", recoverVisibleSession);
+      document.removeEventListener("visibilitychange", recoverVisibleSession);
       data.subscription.unsubscribe();
     };
   }, []);
