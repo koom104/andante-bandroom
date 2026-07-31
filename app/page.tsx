@@ -440,7 +440,7 @@ function memberRehearsalLeaderboard(
       }
     }
 
-  const sortedRows = [...totals.entries()]
+  const rows = [...totals.entries()]
     .map(([userId, totalDuration]) => {
       const profile = profileById.get(userId);
 
@@ -451,8 +451,15 @@ function memberRehearsalLeaderboard(
         totalDuration,
         rank: 0,
       };
-    })
-    .sort((a, b) => b.totalDuration - a.totalDuration || a.cohort.localeCompare(b.cohort) || a.name.localeCompare(b.name));
+    });
+
+  return rankRehearsalLeaderboard(rows);
+}
+
+function rankRehearsalLeaderboard(rows: RehearsalRankRow[]): RehearsalRankRow[] {
+  const sortedRows = [...rows].sort(
+    (a, b) => b.totalDuration - a.totalDuration || a.cohort.localeCompare(b.cohort) || a.name.localeCompare(b.name),
+  );
 
   let previousDuration: number | null = null;
   let previousRank = 0;
@@ -1118,19 +1125,21 @@ export default function Home() {
     });
     const nextRehearsalLeaderboardRows = rehearsalLeaderboardError
       ? []
-      : ((rehearsalLeaderboardResult.data ?? []) as Array<{
-          user_id: string;
-          name: string;
-          cohort: string;
-          total_duration: number;
-          rank: number;
-        }>).map((row) => ({
-          userId: row.user_id,
-          name: row.name,
-          cohort: row.cohort,
-          totalDuration: Number(row.total_duration) || 0,
-          rank: Number(row.rank) || 0,
-        }));
+      : rankRehearsalLeaderboard(
+          ((rehearsalLeaderboardResult.data ?? []) as Array<{
+            user_id: string;
+            name: string;
+            cohort: string;
+            total_duration: number;
+            rank: number;
+          }>).map((row) => ({
+            userId: row.user_id,
+            name: row.name,
+            cohort: row.cohort,
+            totalDuration: Number(row.total_duration) || 0,
+            rank: 0,
+          })),
+        );
     const nextTeamRehearsalTotals = Object.fromEntries(
       (teamRehearsalTotalsError
         ? []
