@@ -14,10 +14,16 @@ create table if not exists public.profiles (
   role text not null default 'member' check (role in ('member', 'manager', 'admin')),
   status text not null default 'pending' check (status in ('pending', 'approved', 'rejected', 'suspended')),
   password_reset_required boolean not null default false,
+  privacy_consent_at timestamptz,
+  privacy_consent_version text,
   created_at timestamptz not null default now(),
   approved_at timestamptz,
   approved_by uuid references public.profiles(id)
 );
+
+alter table public.profiles
+  add column if not exists privacy_consent_at timestamptz,
+  add column if not exists privacy_consent_version text;
 
 alter table public.profiles
   drop constraint if exists profiles_identity_length_check;
@@ -776,7 +782,12 @@ set search_path = public
 as $$
 declare
   is_owner boolean := lower(coalesce(new.email, '')) = 'k91372960@gmail.com';
+  has_privacy_consent boolean := coalesce(new.raw_user_meta_data ->> 'privacy_consent', '') = 'true';
 begin
+  if not is_owner and not has_privacy_consent then
+    raise exception 'privacy consent required';
+  end if;
+
   insert into public.profiles (
     id,
     email,
@@ -785,7 +796,9 @@ begin
     student_no,
     role,
     status,
-    approved_at
+    approved_at,
+    privacy_consent_at,
+    privacy_consent_version
   )
   values (
     new.id,
@@ -795,7 +808,13 @@ begin
     coalesce(nullif(new.raw_user_meta_data ->> 'student_no', ''), '-'),
     case when is_owner then 'admin' else 'member' end,
     case when is_owner then 'approved' else 'pending' end,
-    case when is_owner then now() else null end
+    case when is_owner then now() else null end,
+    case when has_privacy_consent then now() else null end,
+    case
+      when has_privacy_consent
+        then nullif(new.raw_user_meta_data ->> 'privacy_consent_version', '')
+      else null
+    end
   )
   on conflict (id) do update
     set email = excluded.email;

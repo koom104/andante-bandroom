@@ -155,6 +155,7 @@ type TeamRehearsalTotal = {
 const days: Day[] = ["월", "화", "수", "목", "금", "토", "일"];
 const dateDayNames: Day[] = ["일", "월", "화", "수", "목", "금", "토"];
 const sessionOptions: SessionRole[] = ["보컬", "리드기타", "리듬기타", "어쿠스틱", "베이스", "드럼", "피아노", "신디"];
+const privacyConsentVersion = "2026-07-31-v1";
 
 function normalizeSessionRole(session: string): SessionRole {
   return session === "세컨기타" ? "리듬기타" : (session as SessionRole);
@@ -1397,8 +1398,14 @@ export default function Home() {
     name: string;
     cohort: string;
     studentNo: string;
+    privacyConsent: boolean;
   }) {
     setAuthNotice("");
+    if (!payload.privacyConsent) {
+      setAuthNotice("개인정보 수집·이용에 동의해야 가입할 수 있습니다.");
+      return;
+    }
+
     const { data: duplicateData, error: duplicateError } = await supabase.rpc("check_signup_duplicate", {
       p_name: payload.name,
       p_student_no: payload.studentNo,
@@ -1432,6 +1439,8 @@ export default function Home() {
           name: payload.name,
           cohort: payload.cohort,
           student_no: payload.studentNo,
+          privacy_consent: true,
+          privacy_consent_version: privacyConsentVersion,
         },
       },
     });
@@ -2417,7 +2426,14 @@ function AuthScreen({
   notice,
 }: {
   onSignIn: (email: string, password: string) => Promise<void>;
-  onSignUp: (payload: { email: string; password: string; name: string; cohort: string; studentNo: string }) => Promise<void>;
+  onSignUp: (payload: {
+    email: string;
+    password: string;
+    name: string;
+    cohort: string;
+    studentNo: string;
+    privacyConsent: boolean;
+  }) => Promise<void>;
   notice: string;
 }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -2427,6 +2443,7 @@ function AuthScreen({
   const [name, setName] = useState("");
   const [cohort, setCohort] = useState("");
   const [studentNo, setStudentNo] = useState("");
+  const [privacyConsent, setPrivacyConsent] = useState(false);
   const [message, setMessage] = useState("");
 
   async function submit() {
@@ -2450,6 +2467,11 @@ function AuthScreen({
       return;
     }
 
+    if (mode === "signup" && !privacyConsent) {
+      setMessage("개인정보 수집·이용에 동의해 주세요.");
+      return;
+    }
+
     setMessage("");
 
     if (mode === "login") {
@@ -2463,6 +2485,7 @@ function AuthScreen({
       name: name.trim(),
       cohort: normalizeCohort(cohort),
       studentNo: studentNo.trim(),
+      privacyConsent,
     });
   }
 
@@ -2504,6 +2527,42 @@ function AuthScreen({
               <LabeledInput label="이름" value={name} onChange={setName} placeholder="홍길동" />
               <LabeledInput label="기수" value={cohort} onChange={setCohort} placeholder="예: 12기" />
               <LabeledInput label="학번" value={studentNo} onChange={setStudentNo} placeholder="예: 20261234" />
+              <div className="rounded-lg border border-[#f0ded7] bg-[#fffaf8] p-3">
+                <label className="flex cursor-pointer items-start gap-2 text-xs font-semibold leading-5 text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={privacyConsent}
+                    onChange={(event) => setPrivacyConsent(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#ff665a]"
+                  />
+                  <span>[필수] 개인정보 수집·이용에 동의합니다.</span>
+                </label>
+                <details className="mt-2 border-t border-[#f0ded7] pt-2 text-[11px] leading-5 text-slate-600">
+                  <summary className="cursor-pointer font-semibold text-slate-700">수집·이용 내용 보기</summary>
+                  <dl className="mt-2 space-y-1.5">
+                    <div>
+                      <dt className="font-semibold text-slate-800">수집 목적</dt>
+                      <dd>회원 식별과 승인, 팀 구성, 시간표 관리, 합주 예약 및 이용 기록 관리</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-slate-800">수집 항목</dt>
+                      <dd>이름, 기수, 학번, 이메일, 개인 시간표, 소속 팀·세션, 예약 및 합주 참여 기록</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-slate-800">보유 기간</dt>
+                      <dd>가입일부터 해당 학년도 겨울공연 종료 후 30일까지</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-slate-800">동의 거부 안내</dt>
+                      <dd>동의를 거부할 수 있으나, 거부 시 회원가입과 서비스 이용이 불가능합니다.</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-slate-800">파기 방법</dt>
+                      <dd>보유기간 종료 또는 동의 철회 시 관련 정보를 복구할 수 없는 방식으로 삭제합니다.</dd>
+                    </div>
+                  </dl>
+                </details>
+              </div>
             </>
           )}
 
