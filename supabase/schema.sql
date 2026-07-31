@@ -828,6 +828,32 @@ create trigger on_auth_user_created
 after insert on auth.users
 for each row execute function public.handle_new_user();
 
+create or replace function public.accept_privacy_consent()
+returns timestamptz
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  accepted_at timestamptz := now();
+begin
+  if auth.uid() is null then
+    raise exception 'authentication required';
+  end if;
+
+  update public.profiles
+  set privacy_consent_at = accepted_at,
+      privacy_consent_version = '2026-07-31-v1'
+  where id = auth.uid();
+
+  if not found then
+    raise exception 'profile not found';
+  end if;
+
+  return accepted_at;
+end;
+$$;
+
 create or replace function public.create_team(
   p_name text,
   p_song text,
@@ -2001,6 +2027,7 @@ drop policy if exists "audit_insert_admin" on public.audit_logs;
 grant execute on function public.create_team(text, text, uuid, jsonb) to authenticated;
 grant execute on function public.update_team(uuid, text, text, uuid, jsonb) to authenticated;
 grant execute on function public.check_signup_duplicate(text, text) to anon, authenticated;
+grant execute on function public.accept_privacy_consent() to authenticated;
 grant execute on function public.complete_password_reset() to authenticated;
 grant execute on function public.save_member_weekly_schedule(uuid, jsonb) to authenticated;
 grant execute on function public.get_rehearsal_leaderboard() to authenticated;
@@ -2039,6 +2066,7 @@ revoke insert, update, delete on public.bookings from authenticated;
 revoke all on function public.create_team(text, text, uuid, jsonb) from public;
 revoke all on function public.update_team(uuid, text, text, uuid, jsonb) from public;
 revoke all on function public.check_signup_duplicate(text, text) from public;
+revoke all on function public.accept_privacy_consent() from public;
 revoke all on function public.complete_password_reset() from public;
 revoke all on function public.save_member_weekly_schedule(uuid, jsonb) from public;
 revoke all on function public.get_rehearsal_leaderboard() from public;

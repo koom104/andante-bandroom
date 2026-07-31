@@ -35,6 +35,8 @@ type Profile = {
   role: Role;
   status: ProfileStatus;
   password_reset_required?: boolean;
+  privacy_consent_at?: string | null;
+  privacy_consent_version?: string | null;
   created_at?: string;
 };
 
@@ -1477,6 +1479,28 @@ export default function Home() {
     setStatus("비밀번호를 다시 설정했어요.");
   }
 
+  async function acceptPrivacyConsent() {
+    if (!session) {
+      return;
+    }
+
+    setStatus("");
+    const { error } = await supabase.rpc("accept_privacy_consent");
+
+    if (error) {
+      const message = getErrorMessage(error);
+      setStatus(
+        isMissingSchemaError(message)
+          ? "개인정보 동의 DB 함수가 필요합니다. Supabase SQL Editor에서 patch-033-existing-member-privacy-consent.sql을 실행해 주세요."
+          : message,
+      );
+      return;
+    }
+
+    setStatus("개인정보 수집·이용 동의가 완료됐어요.");
+    await loadProfile(session);
+  }
+
   function changeBookingGoal(goal: string) {
     setSelectedBookingGoal(goal);
     setSelectedTeamId("");
@@ -2225,6 +2249,14 @@ export default function Home() {
     );
   }
 
+  if (profile.privacy_consent_at === null) {
+    return (
+      <PhoneShell>
+        <PrivacyConsentScreen status={status} onAccept={acceptPrivacyConsent} onSignOut={signOut} />
+      </PhoneShell>
+    );
+  }
+
   if (profile.status !== "approved") {
     return (
       <PhoneShell>
@@ -2420,6 +2452,53 @@ function CenteredMessage({ title, body }: { title: string; body: string }) {
   );
 }
 
+function PrivacyConsentAgreement({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-[#f0ded7] bg-[#fffaf8] p-3">
+      <label className="flex cursor-pointer items-start gap-2 text-xs font-semibold leading-5 text-slate-800">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[#ff665a]"
+        />
+        <span>[필수] 개인정보 수집·이용에 동의합니다.</span>
+      </label>
+      <details className="mt-2 border-t border-[#f0ded7] pt-2 text-[11px] leading-5 text-slate-600">
+        <summary className="cursor-pointer font-semibold text-slate-700">수집·이용 내용 보기</summary>
+        <dl className="mt-2 space-y-1.5">
+          <div>
+            <dt className="font-semibold text-slate-800">수집 목적</dt>
+            <dd>회원 식별과 승인, 팀 구성, 시간표 관리, 합주 예약 및 이용 기록 관리</dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-slate-800">수집 항목</dt>
+            <dd>이름, 기수, 학번, 이메일, 개인 시간표, 소속 팀·세션, 예약 및 합주 참여 기록</dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-slate-800">보유 기간</dt>
+            <dd>가입일부터 해당 학년도 겨울공연 종료 후 30일까지</dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-slate-800">동의 거부 안내</dt>
+            <dd>동의를 거부할 수 있으나, 거부 시 회원가입과 서비스 이용이 불가능합니다.</dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-slate-800">파기 방법</dt>
+            <dd>보유기간 종료 또는 동의 철회 시 관련 정보를 복구할 수 없는 방식으로 삭제합니다.</dd>
+          </div>
+        </dl>
+      </details>
+    </div>
+  );
+}
+
 function AuthScreen({
   onSignIn,
   onSignUp,
@@ -2527,42 +2606,7 @@ function AuthScreen({
               <LabeledInput label="이름" value={name} onChange={setName} placeholder="홍길동" />
               <LabeledInput label="기수" value={cohort} onChange={setCohort} placeholder="예: 12기" />
               <LabeledInput label="학번" value={studentNo} onChange={setStudentNo} placeholder="예: 20261234" />
-              <div className="rounded-lg border border-[#f0ded7] bg-[#fffaf8] p-3">
-                <label className="flex cursor-pointer items-start gap-2 text-xs font-semibold leading-5 text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={privacyConsent}
-                    onChange={(event) => setPrivacyConsent(event.target.checked)}
-                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#ff665a]"
-                  />
-                  <span>[필수] 개인정보 수집·이용에 동의합니다.</span>
-                </label>
-                <details className="mt-2 border-t border-[#f0ded7] pt-2 text-[11px] leading-5 text-slate-600">
-                  <summary className="cursor-pointer font-semibold text-slate-700">수집·이용 내용 보기</summary>
-                  <dl className="mt-2 space-y-1.5">
-                    <div>
-                      <dt className="font-semibold text-slate-800">수집 목적</dt>
-                      <dd>회원 식별과 승인, 팀 구성, 시간표 관리, 합주 예약 및 이용 기록 관리</dd>
-                    </div>
-                    <div>
-                      <dt className="font-semibold text-slate-800">수집 항목</dt>
-                      <dd>이름, 기수, 학번, 이메일, 개인 시간표, 소속 팀·세션, 예약 및 합주 참여 기록</dd>
-                    </div>
-                    <div>
-                      <dt className="font-semibold text-slate-800">보유 기간</dt>
-                      <dd>가입일부터 해당 학년도 겨울공연 종료 후 30일까지</dd>
-                    </div>
-                    <div>
-                      <dt className="font-semibold text-slate-800">동의 거부 안내</dt>
-                      <dd>동의를 거부할 수 있으나, 거부 시 회원가입과 서비스 이용이 불가능합니다.</dd>
-                    </div>
-                    <div>
-                      <dt className="font-semibold text-slate-800">파기 방법</dt>
-                      <dd>보유기간 종료 또는 동의 철회 시 관련 정보를 복구할 수 없는 방식으로 삭제합니다.</dd>
-                    </div>
-                  </dl>
-                </details>
-              </div>
+              <PrivacyConsentAgreement checked={privacyConsent} onChange={setPrivacyConsent} />
             </>
           )}
 
@@ -2572,6 +2616,67 @@ function AuthScreen({
 
           <button type="button" onClick={submit} className="h-12 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white">
             {mode === "login" ? "로그인하기" : "가입 신청하기"}
+          </button>
+        </div>
+      </MobilePanel>
+    </div>
+  );
+}
+
+function PrivacyConsentScreen({
+  status,
+  onAccept,
+  onSignOut,
+}: {
+  status: string;
+  onAccept: () => Promise<void>;
+  onSignOut: () => void;
+}) {
+  const [hasConsent, setHasConsent] = useState(false);
+  const [message, setMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function submit() {
+    if (!hasConsent) {
+      setMessage("개인정보 수집·이용에 동의해 주세요.");
+      return;
+    }
+
+    setMessage("");
+    setIsSaving(true);
+    await onAccept();
+    setIsSaving(false);
+  }
+
+  return (
+    <div className="space-y-3">
+      <MobilePanel>
+        <p className="text-xs font-semibold text-[#ef6351]">개인정보 이용 동의</p>
+        <h1 className="mt-2 text-2xl font-semibold">서비스 이용을 위해 동의가 필요합니다</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          기존 회원의 개인정보 처리 내용을 안내하고 동의 이력을 기록하기 위한 절차입니다.
+        </p>
+      </MobilePanel>
+      <MobilePanel title="개인정보 수집·이용">
+        <div className="space-y-3">
+          <PrivacyConsentAgreement checked={hasConsent} onChange={setHasConsent} />
+          {(message || status) && (
+            <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-[#be3d33]">{message || status}</p>
+          )}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={isSaving}
+            className="h-12 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
+          >
+            {isSaving ? "처리 중" : "동의하고 계속하기"}
+          </button>
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="h-10 w-full rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-600"
+          >
+            로그아웃
           </button>
         </div>
       </MobilePanel>
