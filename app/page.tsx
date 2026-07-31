@@ -464,8 +464,8 @@ function rankRehearsalLeaderboard(rows: RehearsalRankRow[]): RehearsalRankRow[] 
   let previousDuration: number | null = null;
   let previousRank = 0;
 
-  return sortedRows.map((row, index) => {
-    const rank = previousDuration === row.totalDuration ? previousRank : index + 1;
+  return sortedRows.map((row) => {
+    const rank = previousDuration === row.totalDuration ? previousRank : previousRank + 1;
     previousDuration = row.totalDuration;
     previousRank = rank;
 

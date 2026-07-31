@@ -1086,8 +1086,8 @@ as $$
     member_totals.name,
     member_totals.cohort,
     member_totals.total_duration,
-    rank() over (
-      order by member_totals.total_duration desc, member_totals.cohort asc, member_totals.name asc
+    dense_rank() over (
+      order by member_totals.total_duration desc
     ) as rank
   from member_totals
   order by rank asc, member_totals.cohort asc, member_totals.name asc;
