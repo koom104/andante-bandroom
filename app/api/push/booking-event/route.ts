@@ -7,10 +7,12 @@ import {
   type PushSubscriptionRecord,
   type PushTeam,
 } from "../../../push-utils";
+import { rejectCrossOriginMutation } from "../../request-security";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_dKyziP5Nq6fTyZWkUd5OQQ_D5oyYD2P";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 type BookingEventBody = {
   bookingIds?: string[];
@@ -46,6 +48,15 @@ function webPushConfig() {
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest) {
+  const crossOriginResponse = rejectCrossOriginMutation(request);
+  if (crossOriginResponse) {
+    return crossOriginResponse;
+  }
+
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    return NextResponse.json({ error: "알림 서버 설정을 확인해주세요." }, { status: 500 });
+  }
+
   const config = webPushConfig();
   if (!config.publicKey || !config.privateKey) {
     return NextResponse.json({ error: "WEB_PUSH_PUBLIC_KEY 또는 WEB_PUSH_PRIVATE_KEY가 서버 환경변수에 없습니다." }, { status: 500 });
@@ -81,6 +92,12 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${token}`,
       },
     },
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+  const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -135,7 +152,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const { data: targets, error: targetError } = await requesterClient.rpc("claim_booking_push_targets", {
+  const { data: targets, error: targetError } = await adminClient.rpc("claim_booking_push_targets", {
+    p_requester_id: userData.user.id,
     p_booking_ids: bookingIds,
     p_kind: kind,
   });
@@ -144,7 +162,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: targetError.code === "42883" || targetError.code === "PGRST202"
-          ? "Supabase SQL Editor에서 supabase/patch-028-security-hardening.sql을 실행해 주세요."
+          ? "Supabase SQL Editor에서 supabase/patch-034-security-audit.sql을 실행해 주세요."
           : "알림 대상을 확인하지 못했습니다.",
       },
       { status: 500 },
@@ -194,7 +212,10 @@ export async function POST(request: NextRequest) {
       };
       const response = await sendWebPush(subscription, payload, config).catch(() => null);
       if (response?.status === 404 || response?.status === 410) {
-        await requesterClient.rpc("disable_my_push_subscription", { p_subscription_id: row.subscription_id }).catch(() => undefined);
+        await adminClient
+          .from("push_subscriptions")
+          .update({ disabled_at: new Date().toISOString() })
+          .eq("id", row.subscription_id);
       }
       if (response?.ok) {
         sent += 1;

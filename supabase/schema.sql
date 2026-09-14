@@ -398,6 +398,26 @@ as $$
   );
 $$;
 
+create or replace function public.can_view_member_schedule(p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    p_user_id = auth.uid()
+    or public.is_admin(auth.uid())
+    or exists (
+      select 1
+      from public.team_members requester_membership
+      join public.team_members target_membership
+        on target_membership.team_id = requester_membership.team_id
+      where requester_membership.user_id = auth.uid()
+        and target_membership.user_id = p_user_id
+    );
+$$;
+
 create or replace function public.save_push_subscription(
   p_endpoint text,
   p_p256dh text,
@@ -511,6 +531,7 @@ end;
 $$;
 
 create or replace function public.claim_booking_push_targets(
+  p_requester_id uuid,
   p_booking_ids uuid[],
   p_kind text
 )
@@ -541,10 +562,10 @@ as $$
     from public.bookings b
     where cardinality(p_booking_ids) between 1 and 20
       and b.id = any(p_booking_ids)
-      and public.is_approved(auth.uid())
+      and public.is_approved(p_requester_id)
       and (
-        public.is_admin(auth.uid())
-        or public.is_team_leader(b.team_id, auth.uid())
+        public.is_admin(p_requester_id)
+        or public.is_team_leader(b.team_id, p_requester_id)
       )
       and (
         (p_kind = 'booking_created' and b.status = 'confirmed')
@@ -1103,37 +1124,43 @@ stable
 security definer
 set search_path = public
 as $$
-  with member_totals as (
+  with tracking_window as (
+    select coalesce(
+      (select count_from_date from public.rehearsal_tracking_settings where id = 1),
+      date '1970-01-01'
+    ) as count_from_date
+  ),
+  slot_totals as (
+    select
+      bas.user_id,
+      (count(*) * 0.5)::numeric as total_duration
+    from public.booking_attendance_slots bas
+    join public.bookings b on b.id = bas.booking_id
+    cross join tracking_window tw
+    where b.status = 'confirmed'
+      and b.booking_type = 'rehearsal'
+      and b.booking_date < current_date
+      and b.booking_date >= tw.count_from_date
+    group by bas.user_id
+  ),
+  member_totals as (
     select
       p.id as user_id,
       p.name,
       p.cohort,
-      (count(b.id) * 0.5)::numeric as total_duration
+      coalesce(slot_totals.total_duration, 0)::numeric as total_duration
     from public.profiles p
-    left join public.booking_attendance_slots bas
-      on bas.user_id = p.id
-    left join public.bookings b
-      on b.id = bas.booking_id
-      and b.status = 'confirmed'
-      and b.booking_type = 'rehearsal'
-      and b.booking_date < current_date
-      and b.booking_date >= coalesce(
-        (select count_from_date from public.rehearsal_tracking_settings where id = 1),
-        date '1970-01-01'
-      )
+    left join slot_totals on slot_totals.user_id = p.id
     where p.role <> 'admin'
       and p.status = 'approved'
       and public.is_approved(auth.uid())
-    group by p.id, p.name, p.cohort
   )
   select
     member_totals.user_id,
     member_totals.name,
     member_totals.cohort,
     member_totals.total_duration,
-    dense_rank() over (
-      order by member_totals.total_duration desc
-    ) as rank
+    dense_rank() over (order by member_totals.total_duration desc) as rank
   from member_totals
   order by rank asc, member_totals.cohort asc, member_totals.name asc;
 $$;
@@ -1151,44 +1178,52 @@ stable
 security definer
 set search_path = public
 as $$
+  with tracking_window as (
+    select coalesce(
+      (select count_from_date from public.rehearsal_tracking_settings where id = 1),
+      date '1970-01-01'
+    ) as count_from_date
+  ),
+  relevant_bookings as (
+    select b.id, b.team_id, b.duration
+    from public.bookings b
+    cross join tracking_window tw
+    where b.status = 'confirmed'
+      and b.booking_type = 'rehearsal'
+      and b.booking_date < current_date
+      and b.booking_date >= tw.count_from_date
+  ),
+  booking_totals as (
+    select relevant_bookings.team_id, sum(relevant_bookings.duration)::numeric as total_duration
+    from relevant_bookings
+    group by relevant_bookings.team_id
+  ),
+  roster_counts as (
+    select br.booking_id, count(*) as member_count
+    from public.booking_roster br
+    join relevant_bookings rb on rb.id = br.booking_id
+    group by br.booking_id
+  ),
+  full_team_slots as (
+    select rb.team_id, bas.booking_id, bas.start_time
+    from relevant_bookings rb
+    join public.booking_attendance_slots bas on bas.booking_id = rb.id
+    join roster_counts rc on rc.booking_id = rb.id
+    group by rb.team_id, bas.booking_id, bas.start_time, rc.member_count
+    having count(*) = rc.member_count and rc.member_count > 0
+  ),
+  full_team_totals as (
+    select full_team_slots.team_id, (count(*) * 0.5)::numeric as total_session_duration
+    from full_team_slots
+    group by full_team_slots.team_id
+  )
   select
     t.id as team_id,
-    coalesce((
-      select sum(b.duration)
-      from public.bookings b
-      where b.team_id = t.id
-        and b.status = 'confirmed'
-        and b.booking_type = 'rehearsal'
-        and b.booking_date < current_date
-        and b.booking_date >= coalesce(
-          (select count_from_date from public.rehearsal_tracking_settings where id = 1),
-          date '1970-01-01'
-        )
-    ), 0)::numeric as total_duration,
-    coalesce((
-      select count(*) * 0.5
-      from (
-        select bas.booking_id, bas.start_time
-        from public.booking_attendance_slots bas
-        join public.bookings b on b.id = bas.booking_id
-        where b.team_id = t.id
-          and b.status = 'confirmed'
-          and b.booking_type = 'rehearsal'
-          and b.booking_date < current_date
-          and b.booking_date >= coalesce(
-            (select count_from_date from public.rehearsal_tracking_settings where id = 1),
-            date '1970-01-01'
-          )
-        group by bas.booking_id, bas.start_time
-        having count(*) = (
-          select count(*)
-          from public.booking_roster br
-          where br.booking_id = bas.booking_id
-        )
-        and count(*) > 0
-      ) full_team_slots
-    ), 0)::numeric as total_session_duration
+    coalesce(booking_totals.total_duration, 0)::numeric as total_duration,
+    coalesce(full_team_totals.total_session_duration, 0)::numeric as total_session_duration
   from public.teams t
+  left join booking_totals on booking_totals.team_id = t.id
+  left join full_team_totals on full_team_totals.team_id = t.id
   where public.is_approved(auth.uid())
   order by total_duration desc, t.name asc;
 $$;
@@ -1761,6 +1796,20 @@ alter table public.push_notification_logs enable row level security;
 alter table public.audit_logs enable row level security;
 alter table public.rehearsal_tracking_settings enable row level security;
 
+create index if not exists team_members_user_id_team_id_idx
+  on public.team_members (user_id, team_id);
+
+create index if not exists bookings_confirmed_date_start_idx
+  on public.bookings (booking_date, start_time)
+  where status = 'confirmed';
+
+create index if not exists bookings_team_rehearsal_date_idx
+  on public.bookings (team_id, booking_date)
+  where status = 'confirmed' and booking_type = 'rehearsal';
+
+create index if not exists booking_attendance_slots_user_booking_idx
+  on public.booking_attendance_slots (user_id, booking_id);
+
 create unique index if not exists push_notification_logs_booking_once
 on public.push_notification_logs (user_id, booking_id, kind)
 where booking_id is not null;
@@ -1880,7 +1929,7 @@ create policy "schedules_select"
 on public.member_schedules
 for select
 to authenticated
-using (public.is_approved(auth.uid()));
+using (public.is_approved(auth.uid()) and public.can_view_member_schedule(user_id));
 
 drop policy if exists "schedules_insert" on public.member_schedules;
 create policy "schedules_insert"
@@ -1909,7 +1958,7 @@ create policy "date_schedules_select"
 on public.member_schedule_date_slots
 for select
 to authenticated
-using (public.is_approved(auth.uid()));
+using (public.is_approved(auth.uid()) and public.can_view_member_schedule(user_id));
 
 drop policy if exists "date_schedules_insert" on public.member_schedule_date_slots;
 create policy "date_schedules_insert"
@@ -2026,7 +2075,6 @@ drop policy if exists "audit_insert_admin" on public.audit_logs;
 
 grant execute on function public.create_team(text, text, uuid, jsonb) to authenticated;
 grant execute on function public.update_team(uuid, text, text, uuid, jsonb) to authenticated;
-grant execute on function public.check_signup_duplicate(text, text) to anon, authenticated;
 grant execute on function public.accept_privacy_consent() to authenticated;
 grant execute on function public.complete_password_reset() to authenticated;
 grant execute on function public.save_member_weekly_schedule(uuid, jsonb) to authenticated;
@@ -2038,12 +2086,13 @@ grant execute on function public.is_super_admin(uuid) to authenticated;
 grant execute on function public.is_approved(uuid) to authenticated;
 grant execute on function public.is_team_member(uuid, uuid) to authenticated;
 grant execute on function public.is_team_leader(uuid, uuid) to authenticated;
+grant execute on function public.can_view_member_schedule(uuid) to authenticated;
 grant execute on function public.get_member_directory() to authenticated;
 grant execute on function public.review_profile_signup(uuid, text) to authenticated;
 grant execute on function public.save_push_subscription(text, text, text, text) to authenticated;
 grant execute on function public.get_my_push_subscriptions() to authenticated;
 grant execute on function public.disable_my_push_subscription(uuid) to authenticated;
-grant execute on function public.claim_booking_push_targets(uuid[], text) to authenticated;
+grant execute on function public.claim_booking_push_targets(uuid, uuid[], text) to service_role;
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date) to authenticated;
 grant execute on function public.create_booking(uuid, text, text, numeric, text, date, text) to authenticated;
 grant execute on function public.create_bookings_with_location(uuid, text, date, text, jsonb) to authenticated;
@@ -2066,6 +2115,7 @@ revoke insert, update, delete on public.bookings from authenticated;
 revoke all on function public.create_team(text, text, uuid, jsonb) from public;
 revoke all on function public.update_team(uuid, text, text, uuid, jsonb) from public;
 revoke all on function public.check_signup_duplicate(text, text) from public;
+revoke all on function public.check_signup_duplicate(text, text) from anon, authenticated;
 revoke all on function public.accept_privacy_consent() from public;
 revoke all on function public.complete_password_reset() from public;
 revoke all on function public.save_member_weekly_schedule(uuid, jsonb) from public;
@@ -2077,12 +2127,13 @@ revoke all on function public.is_super_admin(uuid) from public;
 revoke all on function public.is_approved(uuid) from public;
 revoke all on function public.is_team_member(uuid, uuid) from public;
 revoke all on function public.is_team_leader(uuid, uuid) from public;
+revoke all on function public.can_view_member_schedule(uuid) from public;
 revoke all on function public.get_member_directory() from public;
 revoke all on function public.review_profile_signup(uuid, text) from public;
 revoke all on function public.save_push_subscription(text, text, text, text) from public;
 revoke all on function public.get_my_push_subscriptions() from public;
 revoke all on function public.disable_my_push_subscription(uuid) from public;
-revoke all on function public.claim_booking_push_targets(uuid[], text) from public;
+revoke all on function public.claim_booking_push_targets(uuid, uuid[], text) from public, anon, authenticated;
 revoke all on function public.create_booking(uuid, text, text, numeric, text, date) from public;
 revoke all on function public.create_booking(uuid, text, text, numeric, text, date, text) from public;
 revoke all on function public.create_bookings_with_location(uuid, text, date, text, jsonb) from public;

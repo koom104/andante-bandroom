@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { isValidWebPushSubscription } from "../../../push-utils";
+import { rejectCrossOriginMutation } from "../../request-security";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -21,6 +22,11 @@ function isMissingPushSchema(error: { code?: string; message?: string }) {
 }
 
 export async function POST(request: NextRequest) {
+  const crossOriginResponse = rejectCrossOriginMutation(request);
+  if (crossOriginResponse) {
+    return crossOriginResponse;
+  }
+
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > 16_384) {
     return NextResponse.json({ error: "푸시 구독 정보가 너무 큽니다." }, { status: 413 });

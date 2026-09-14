@@ -80,9 +80,16 @@ function withSecurityHeaders(response: Response, request: Request, env: Env) {
 
   headers.set("content-security-policy", csp);
   headers.set("permissions-policy", "camera=(), geolocation=(), microphone=()");
+  headers.set("cross-origin-opener-policy", "same-origin");
+  headers.set("cross-origin-resource-policy", "same-origin");
   headers.set("referrer-policy", "strict-origin-when-cross-origin");
   headers.set("x-content-type-options", "nosniff");
+  headers.set("x-dns-prefetch-control", "off");
   headers.set("x-frame-options", "DENY");
+
+  if (new URL(request.url).pathname.startsWith("/api/")) {
+    headers.set("cache-control", "no-store");
+  }
 
   if (new URL(request.url).protocol === "https:") {
     headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");

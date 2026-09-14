@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { rejectCrossOriginMutation } from "../../request-security";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -43,8 +44,13 @@ function isMissingPasswordResetColumn(message: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const crossOriginResponse = rejectCrossOriginMutation(request);
+  if (crossOriginResponse) {
+    return crossOriginResponse;
+  }
+
   if (!SUPABASE_SERVICE_ROLE_KEY) {
-    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY가 서버 환경변수에 설정되지 않았습니다." }, { status: 500 });
+    return NextResponse.json({ error: "관리자 서버 설정을 확인해 주세요." }, { status: 500 });
   }
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
@@ -96,7 +102,8 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
 
   if (requesterProfileError) {
-    return NextResponse.json({ error: `관리자 프로필 확인에 실패했습니다: ${requesterProfileError.message}` }, { status: 500 });
+    console.error("Admin profile lookup failed", requesterProfileError);
+    return NextResponse.json({ error: "관리자 프로필 확인에 실패했습니다." }, { status: 500 });
   }
 
   if (!requesterProfile) {
@@ -124,7 +131,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ error: `부원 계정 확인에 실패했습니다: ${targetProfileError.message}` }, { status: 500 });
+    console.error("Password reset target lookup failed", targetProfileError);
+    return NextResponse.json({ error: "부원 계정 확인에 실패했습니다." }, { status: 500 });
   }
 
   if (!targetProfile) {

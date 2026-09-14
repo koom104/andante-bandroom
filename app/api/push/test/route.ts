@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { sendWebPush, type PushSubscriptionRecord } from "../../../push-utils";
+import { rejectCrossOriginMutation } from "../../request-security";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -21,6 +22,11 @@ function isMissingPushSchema(error: { code?: string; message?: string }) {
 type TestPushKind = "daily_digest" | "booking_reminder";
 
 export async function POST(request: NextRequest) {
+  const crossOriginResponse = rejectCrossOriginMutation(request);
+  if (crossOriginResponse) {
+    return crossOriginResponse;
+  }
+
   const config = webPushConfig();
   if (!config.publicKey || !config.privateKey) {
     return NextResponse.json({ error: "WEB_PUSH_PUBLIC_KEY 또는 WEB_PUSH_PRIVATE_KEY가 서버 환경변수에 없습니다." }, { status: 500 });

@@ -264,6 +264,7 @@ async function fetchAllRows<T>(tableName: string, pageSize = 1000): Promise<{ da
 async function fetchRowsByUserIds<T>(
   tableName: string,
   userIds: string[],
+  columns = "*",
   pageSize = 1000,
 ): Promise<{ data: T[] | null; error: unknown | null }> {
   const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
@@ -275,7 +276,7 @@ async function fetchRowsByUserIds<T>(
 
   for (let from = 0; ; from += pageSize) {
     const to = from + pageSize - 1;
-    const { data, error } = await supabase.from(tableName).select("*").in("user_id", uniqueUserIds).range(from, to);
+    const { data, error } = await supabase.from(tableName).select(columns).in("user_id", uniqueUserIds).range(from, to);
 
     if (error) {
       return { data: null, error };
@@ -457,6 +458,42 @@ function memberRehearsalLeaderboard(
     });
 
   return rankRehearsalLeaderboard(rows);
+}
+
+async function fetchDateScheduleRowsByUserIds<T>(
+  userIds: string[],
+  startDate: string,
+  endDate: string,
+  pageSize = 1000,
+): Promise<{ data: T[] | null; error: unknown | null }> {
+  const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+  const rows: T[] = [];
+
+  if (uniqueUserIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("member_schedule_date_slots")
+      .select("user_id,schedule_date,start_time,is_busy")
+      .in("user_id", uniqueUserIds)
+      .gte("schedule_date", startDate)
+      .lte("schedule_date", endDate)
+      .range(from, to);
+
+    if (error) {
+      return { data: null, error };
+    }
+
+    const pageRows = (data ?? []) as T[];
+    rows.push(...pageRows);
+
+    if (pageRows.length < pageSize) {
+      return { data: rows, error: null };
+    }
+  }
 }
 
 function rankRehearsalLeaderboard(rows: RehearsalRankRow[]): RehearsalRankRow[] {
@@ -820,6 +857,7 @@ export default function Home() {
   const [isBooting, setIsBooting] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
+  const rehearsalStatsCacheRef = useRef({ profileId: "", loadedAt: 0 });
 
   useEffect(() => {
     if (activeTab === "suggestions") {
@@ -907,18 +945,20 @@ export default function Home() {
       bookingResult,
       goalCategoryResult,
       clubRoomStatusResult,
-      rehearsalLeaderboardResult,
-      teamRehearsalTotalsResult,
       pushSubscriptionStatusResult,
     ] = await Promise.all([
       profileRequest,
-      supabase.from("teams").select("*").order("created_at", { ascending: true }),
-      supabase.from("team_members").select("*").order("created_at", { ascending: true }),
-      supabase.from("bookings").select("*").eq("status", "confirmed").gte("booking_date", todayISO()).order("booking_date", { ascending: true }).order("start_time", { ascending: true }),
-      supabase.from("rehearsal_goal_categories").select("*").order("name", { ascending: true }),
-      supabase.from("club_room_status").select("*").eq("id", 1).maybeSingle(),
-      supabase.rpc("get_rehearsal_leaderboard"),
-      supabase.rpc("get_team_rehearsal_totals"),
+      supabase.from("teams").select("id,name,song,color_index,created_at").order("created_at", { ascending: true }),
+      supabase.from("team_members").select("team_id,user_id,session,is_leader,created_at").order("created_at", { ascending: true }),
+      supabase
+        .from("bookings")
+        .select("id,team_id,booking_date,day_of_week,start_time,duration,purpose,status,booking_location,booking_type")
+        .eq("status", "confirmed")
+        .gte("booking_date", todayISO())
+        .order("booking_date", { ascending: true })
+        .order("start_time", { ascending: true }),
+      supabase.from("rehearsal_goal_categories").select("id,name,created_at").order("name", { ascending: true }),
+      supabase.from("club_room_status").select("is_open,updated_by,updated_at").eq("id", 1).maybeSingle(),
       isSuperAdmin(profile)
         ? supabase.rpc("get_push_subscription_status")
         : Promise.resolve({ data: [], error: null }),
@@ -949,18 +989,6 @@ export default function Home() {
     const clubRoomStatusError = clubRoomStatusResult.error ? getErrorMessage(clubRoomStatusResult.error) : "";
     if (clubRoomStatusError && !isMissingSchemaError(clubRoomStatusError)) {
       setDbError(clubRoomStatusError);
-      setIsLoadingData(false);
-      return;
-    }
-    const rehearsalLeaderboardError = rehearsalLeaderboardResult.error ? getErrorMessage(rehearsalLeaderboardResult.error) : "";
-    if (rehearsalLeaderboardError && !isMissingSchemaError(rehearsalLeaderboardError)) {
-      setDbError(rehearsalLeaderboardError);
-      setIsLoadingData(false);
-      return;
-    }
-    const teamRehearsalTotalsError = teamRehearsalTotalsResult.error ? getErrorMessage(teamRehearsalTotalsResult.error) : "";
-    if (teamRehearsalTotalsError && !isMissingSchemaError(teamRehearsalTotalsError)) {
-      setDbError(teamRehearsalTotalsError);
       setIsLoadingData(false);
       return;
     }
@@ -1001,9 +1029,11 @@ export default function Home() {
       canUseAdminTab(profile)
         ? nextProfiles.filter((item) => item.status === "approved").map((item) => item.id)
         : [profile.id, ...memberRows.filter((member) => visibleTeamIds.has(member.team_id)).map((member) => member.user_id)];
+    const scheduleStartDate = todayISO();
+    const scheduleEndDate = addDays(scheduleStartDate, 20);
     const [scheduleResult, dateScheduleResult] = await Promise.all([
-      fetchRowsByUserIds("member_schedules", scheduleUserIds),
-      fetchRowsByUserIds("member_schedule_date_slots", scheduleUserIds),
+      fetchRowsByUserIds("member_schedules", scheduleUserIds, "user_id,day_of_week,start_time"),
+      fetchDateScheduleRowsByUserIds(scheduleUserIds, scheduleStartDate, scheduleEndDate),
     ]);
     if (scheduleResult.error) {
       setDbError(getErrorMessage(scheduleResult.error));
@@ -1087,7 +1117,7 @@ export default function Home() {
     const bookingIds = bookingRows.map((booking) => booking.id);
     const bookingAttendanceResult =
       bookingIds.length > 0
-        ? await supabase.from("booking_attendance").select("*").in("booking_id", bookingIds)
+        ? await supabase.from("booking_attendance").select("booking_id,user_id").in("booking_id", bookingIds)
         : { data: [], error: null };
     const bookingAttendanceError = bookingAttendanceResult.error ? getErrorMessage(bookingAttendanceResult.error) : "";
     if (bookingAttendanceError && !isMissingSchemaError(bookingAttendanceError)) {
@@ -1126,39 +1156,6 @@ export default function Home() {
         attendanceUserIds: bookingAttendanceError ? undefined : attendanceByBooking.get(booking.id) ?? [],
       };
     });
-    const nextRehearsalLeaderboardRows = rehearsalLeaderboardError
-      ? []
-      : rankRehearsalLeaderboard(
-          ((rehearsalLeaderboardResult.data ?? []) as Array<{
-            user_id: string;
-            name: string;
-            cohort: string;
-            total_duration: number;
-            rank: number;
-          }>).map((row) => ({
-            userId: row.user_id,
-            name: row.name,
-            cohort: row.cohort,
-            totalDuration: Number(row.total_duration) || 0,
-            rank: 0,
-          })),
-        );
-    const nextTeamRehearsalTotals = Object.fromEntries(
-      (teamRehearsalTotalsError
-        ? []
-        : ((teamRehearsalTotalsResult.data ?? []) as Array<{
-            team_id: string;
-            total_duration: number;
-            total_session_duration: number;
-          }>))
-        .map((row) => [
-          row.team_id,
-          {
-            totalDuration: Number(row.total_duration) || 0,
-            totalSessionDuration: Number(row.total_session_duration) || 0,
-          },
-        ]),
-    );
     const nextPushSubscriptionStatuses = pushSubscriptionStatusError
       ? []
       : ((pushSubscriptionStatusResult.data ?? []) as Array<{
@@ -1209,14 +1206,80 @@ export default function Home() {
     setDateBusyByUser(dateScheduleMap);
     setDateOverrideByUser(dateOverrideMap);
     setRehearsalByUser(rehearsalMap);
-    setRehearsalLeaderboardRows(nextRehearsalLeaderboardRows);
-    setTeamRehearsalTotals(nextTeamRehearsalTotals);
     setPushSubscriptionStatuses(nextPushSubscriptionStatuses);
     setAllTeams(allTeams);
     setTeams(nextTeams);
     setReservations(nextReservations);
     setIsLoadingData(false);
   }, [profile]);
+
+  const refreshRehearsalStats = useCallback(
+    async (force = false) => {
+      if (!profile || profile.status !== "approved") {
+        return;
+      }
+
+      const cache = rehearsalStatsCacheRef.current;
+      const hasFreshCache = cache.profileId === profile.id && Date.now() - cache.loadedAt < 5 * 60 * 1000;
+      if (!force && hasFreshCache) {
+        return;
+      }
+
+      const [leaderboardResult, teamTotalsResult] = await Promise.all([
+        supabase.rpc("get_rehearsal_leaderboard"),
+        supabase.rpc("get_team_rehearsal_totals"),
+      ]);
+      const leaderboardError = leaderboardResult.error ? getErrorMessage(leaderboardResult.error) : "";
+      const teamTotalsError = teamTotalsResult.error ? getErrorMessage(teamTotalsResult.error) : "";
+
+      if (leaderboardError && !isMissingSchemaError(leaderboardError)) {
+        setDbError(leaderboardError);
+        return;
+      }
+      if (teamTotalsError && !isMissingSchemaError(teamTotalsError)) {
+        setDbError(teamTotalsError);
+        return;
+      }
+
+      const nextLeaderboardRows = leaderboardError
+        ? []
+        : rankRehearsalLeaderboard(
+            ((leaderboardResult.data ?? []) as Array<{
+              user_id: string;
+              name: string;
+              cohort: string;
+              total_duration: number;
+            }>).map((row) => ({
+              userId: row.user_id,
+              name: row.name,
+              cohort: row.cohort,
+              totalDuration: Number(row.total_duration) || 0,
+              rank: 0,
+            })),
+          );
+      const nextTeamTotals = Object.fromEntries(
+        (teamTotalsError
+          ? []
+          : ((teamTotalsResult.data ?? []) as Array<{
+              team_id: string;
+              total_duration: number;
+              total_session_duration: number;
+            }>))
+          .map((row) => [
+            row.team_id,
+            {
+              totalDuration: Number(row.total_duration) || 0,
+              totalSessionDuration: Number(row.total_session_duration) || 0,
+            },
+          ]),
+      );
+
+      setRehearsalLeaderboardRows(nextLeaderboardRows);
+      setTeamRehearsalTotals(nextTeamTotals);
+      rehearsalStatsCacheRef.current = { profileId: profile.id, loadedAt: Date.now() };
+    },
+    [profile],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -1283,6 +1346,7 @@ export default function Home() {
         setRehearsalByUser({});
         setRehearsalLeaderboardRows([]);
         setTeamRehearsalTotals({});
+        rehearsalStatsCacheRef.current = { profileId: "", loadedAt: 0 };
         setPushSubscriptionStatuses([]);
         setReservations([]);
         setIsBooting(false);
@@ -1317,6 +1381,12 @@ export default function Home() {
       return () => window.clearTimeout(timeout);
     }
   }, [profile?.status, refreshData]);
+
+  useEffect(() => {
+    if (profile?.status === "approved" && (activeTab === "my" || activeTab === "team")) {
+      void refreshRehearsalStats();
+    }
+  }, [activeTab, profile?.status, refreshRehearsalStats]);
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
   const visibleTabs = canUseAdminTab(profile) ? [...baseTabs, adminTab] : baseTabs;
@@ -1408,31 +1478,6 @@ export default function Home() {
       return;
     }
 
-    const { data: duplicateData, error: duplicateError } = await supabase.rpc("check_signup_duplicate", {
-      p_name: payload.name,
-      p_student_no: payload.studentNo,
-    });
-
-    if (duplicateError) {
-      const message = getErrorMessage(duplicateError);
-      setAuthNotice(
-        isMissingSchemaError(message)
-          ? "회원가입 중복 확인 DB 함수가 필요합니다. Supabase SQL Editor에서 patch-010-team-date-schedule-signup.sql을 실행해 주세요."
-          : message,
-      );
-      return;
-    }
-
-    const duplicateResult = duplicateData as { name_exists?: boolean; student_no_exists?: boolean } | null;
-    if (duplicateResult?.name_exists) {
-      setAuthNotice("이미 같은 이름으로 가입된 계정이 있습니다.");
-      return;
-    }
-    if (duplicateResult?.student_no_exists) {
-      setAuthNotice("이미 같은 학번으로 가입된 계정이 있습니다.");
-      return;
-    }
-
     const { error } = await supabase.auth.signUp({
       email: payload.email,
       password: payload.password,
@@ -1448,7 +1493,12 @@ export default function Home() {
     });
 
     if (error) {
-      setAuthNotice(getErrorMessage(error));
+      const message = getErrorMessage(error);
+      setAuthNotice(
+        message.toLowerCase().includes("database error")
+          ? "이미 등록된 이름 또는 학번인지 확인해 주세요."
+          : message,
+      );
       return;
     }
 
@@ -2062,6 +2112,7 @@ export default function Home() {
 
     setStatus("합주시간을 초기화했어요. 내일 이후 합주부터 다시 누적됩니다.");
     await refreshData();
+    await refreshRehearsalStats(true);
     return data as string;
   }
 
@@ -3862,7 +3913,7 @@ function TeamTab({
   currentUserId: string;
 }) {
   const [mode, setMode] = useState<"create" | "edit">("create");
-  const [registeredTeamGoal, setRegisteredTeamGoal] = useState(allGoalFilterValue);
+  const [registeredTeamGoal, setRegisteredTeamGoal] = useState("");
   const [selectedEditTeamId, setSelectedEditTeamId] = useState("");
   const [teamName, setTeamName] = useState("");
   const [selectedGoal, setSelectedGoal] = useState("");
@@ -3887,8 +3938,8 @@ function TeamTab({
       if (selectedGoal) {
         setSelectedGoal("");
       }
-      if (registeredTeamGoal !== allGoalFilterValue) {
-        setRegisteredTeamGoal(allGoalFilterValue);
+      if (registeredTeamGoal) {
+        setRegisteredTeamGoal("");
       }
       return;
     }
@@ -3896,13 +3947,21 @@ function TeamTab({
     if (!goalCategories.some((category) => category.name === selectedGoal)) {
       setSelectedGoal(goalCategories[0].name);
     }
-    if (registeredTeamGoal !== allGoalFilterValue && !goalCategories.some((category) => category.name === registeredTeamGoal)) {
-      setRegisteredTeamGoal(allGoalFilterValue);
+    if (
+      registeredTeamGoal &&
+      registeredTeamGoal !== allGoalFilterValue &&
+      !goalCategories.some((category) => category.name === registeredTeamGoal)
+    ) {
+      setRegisteredTeamGoal("");
     }
   }, [goalCategories, registeredTeamGoal, selectedGoal]);
 
   const isAllRegisteredTeamGoal = registeredTeamGoal === allGoalFilterValue;
-  const registeredGoalTeams = isAllRegisteredTeamGoal ? allTeams : allTeams.filter((team) => team.song === registeredTeamGoal);
+  const registeredGoalTeams = !registeredTeamGoal
+    ? []
+    : isAllRegisteredTeamGoal
+      ? allTeams
+      : allTeams.filter((team) => team.song === registeredTeamGoal);
 
   useEffect(() => {
     setMemberId("");
@@ -4178,8 +4237,12 @@ function TeamTab({
                 </div>
               );
             })}
-            {registeredGoalTeams.length === 0 && (
-              <EmptyText text={isAllRegisteredTeamGoal ? "등록된 팀이 없습니다." : "선택한 합주 목표에 등록된 팀이 없습니다."} />
+            {!registeredTeamGoal ? (
+              <EmptyText text="목표를 선택해 주세요." />
+            ) : (
+              registeredGoalTeams.length === 0 && (
+                <EmptyText text={isAllRegisteredTeamGoal ? "등록된 팀이 없습니다." : "선택한 합주 목표에 등록된 팀이 없습니다."} />
+              )
             )}
           </div>
         </div>
@@ -5289,6 +5352,11 @@ function GoalCategorySelect({
         disabled={isDisabled}
         className="mt-2 h-10 w-full rounded-lg border border-[#f0ded7] bg-white px-3 text-sm outline-none transition focus:border-[#ff665a] disabled:bg-slate-50 disabled:text-slate-400"
       >
+        {includeAllOption && (
+          <option value="" disabled>
+            목표를 선택해 주세요
+          </option>
+        )}
         {includeAllOption && <option value={allGoalFilterValue}>전체 표시</option>}
         {categories.length === 0 && !includeAllOption && (
           <option value="" disabled>
@@ -5623,11 +5691,14 @@ function ScheduleGrid({
   const [isSaving, setIsSaving] = useState(false);
   const isPaintingRef = useRef(false);
   const selectedBand = timeBands.find((band) => band.id === selectedBandId) ?? timeBands[0];
-  const gridColumns = columns ?? days.map((day) => ({ label: day, day }));
+  const gridColumns: ScheduleColumn[] = columns ?? days.map((day) => ({ label: day, day }));
+  const selectedScheduleDate = gridColumns.length === 1 ? gridColumns[0].date : undefined;
   const timeLabelColumnWidth = gridColumns.length >= 7 ? 34 : 42;
   const gridTemplateColumns = `${timeLabelColumnWidth}px repeat(${gridColumns.length}, minmax(0, 1fr))`;
   const showsRehearsals = rehearsals.length > 0;
   const hasChanges = !scheduleSetsEqual(draftBusy, busy);
+  const wholeDateSlotKeys = selectedScheduleDate ? timeSlots.map((time) => dateSlotKey(selectedScheduleDate, time)) : [];
+  const isWholeDateBusy = wholeDateSlotKeys.length > 0 && wholeDateSlotKeys.every((key) => draftBusy.includes(key));
   const visibleTimeSlots = timeSlots.filter((time) => {
     const minutes = timeToMinutes(time);
     return minutes >= selectedBand.start && minutes < selectedBand.end;
@@ -5712,6 +5783,20 @@ function ScheduleGrid({
     setIsSaving(false);
   }
 
+  function toggleWholeDateAvailability() {
+    if (!selectedScheduleDate) {
+      return;
+    }
+
+    const wholeDateSlotSet = new Set(wholeDateSlotKeys);
+    setDraftBusy((current) =>
+      isWholeDateBusy
+        ? current.filter((key) => !wholeDateSlotSet.has(key))
+        : [...new Set([...current, ...wholeDateSlotKeys])],
+    );
+    setEditMode(null);
+  }
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-4 gap-1">
@@ -5728,6 +5813,20 @@ function ScheduleGrid({
             <span className="block text-[10px] opacity-75">{band.range}</span>
           </button>
         ))}
+        {selectedScheduleDate && (
+          <button
+            type="button"
+            onClick={toggleWholeDateAvailability}
+            disabled={isSaving}
+            className={`col-span-4 h-10 rounded-lg border text-xs font-semibold disabled:text-slate-300 ${
+              isWholeDateBusy
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-[#ffb3aa] bg-[#fff0eb] text-[#be3d33]"
+            }`}
+          >
+            {isWholeDateBusy ? "하루 전체 가능" : "하루 전체 불가"}
+          </button>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-2">
         {([
