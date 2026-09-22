@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { isValidWebPushSubscription } from "../../../push-utils";
 import { rejectCrossOriginMutation } from "../../request-security";
+import { readBoundedJson } from "../../bounded-json";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -39,7 +40,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => null)) as SubscribeBody | null;
+  const parsed = await readBoundedJson(request, 16_384);
+  if (!parsed.ok) return NextResponse.json({ error: "잘못된 요청입니다." }, { status: parsed.status });
+  const body = parsed.value as SubscribeBody;
   const subscription = body?.subscription;
   const endpoint = subscription?.endpoint ?? "";
   const p256dh = subscription?.keys?.p256dh ?? "";

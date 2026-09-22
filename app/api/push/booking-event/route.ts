@@ -8,16 +8,12 @@ import {
   type PushTeam,
 } from "../../../push-utils";
 import { rejectCrossOriginMutation } from "../../request-security";
+import { readBoundedJson } from "../../bounded-json";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_dKyziP5Nq6fTyZWkUd5OQQ_D5oyYD2P";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-
-type BookingEventBody = {
-  bookingIds?: string[];
-  kind?: "booking_created" | "booking_cancelled";
-};
 
 type BookingPushTarget = {
   booking_id: string;
@@ -73,9 +69,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => null)) as BookingEventBody | null;
-  const bookingIds = Array.from(new Set(body?.bookingIds ?? [])).filter(Boolean);
-  const kind = body?.kind;
+  const parsed = await readBoundedJson(request, 8_192);
+  if (!parsed.ok) return NextResponse.json({ error: "잘못된 요청입니다." }, { status: parsed.status });
+  const body = parsed.value;
+  if (!Array.isArray(body.bookingIds) || body.bookingIds.length > 20 ||
+      !body.bookingIds.every((id): id is string => typeof id === "string" && uuidPattern.test(id))) {
+    return NextResponse.json({ error: "예약 ID 형식이 올바르지 않습니다." }, { status: 400 });
+  }
+  const bookingIds = Array.from(new Set(body.bookingIds));
+  const kind = body.kind;
 
   if (
     (kind !== "booking_created" && kind !== "booking_cancelled") ||

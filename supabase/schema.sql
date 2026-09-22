@@ -1089,7 +1089,8 @@ begin
     raise exception 'login required';
   end if;
 
-  if not (public.is_admin(auth.uid()) or p_user_id = auth.uid()) then
+  if not public.is_approved(auth.uid())
+    or not (public.is_admin(auth.uid()) or p_user_id = auth.uid()) then
     raise exception 'not allowed';
   end if;
 
@@ -1924,6 +1925,18 @@ to authenticated
 using (false)
 with check (false);
 
+drop policy if exists "schedules_require_approval" on public.member_schedules;
+create policy "schedules_require_approval"
+on public.member_schedules as restrictive for all to authenticated
+using (public.is_approved(auth.uid()))
+with check (public.is_approved(auth.uid()));
+
+drop policy if exists "date_schedules_require_approval" on public.member_schedule_date_slots;
+create policy "date_schedules_require_approval"
+on public.member_schedule_date_slots as restrictive for all to authenticated
+using (public.is_approved(auth.uid()))
+with check (public.is_approved(auth.uid()));
+
 drop policy if exists "schedules_select" on public.member_schedules;
 create policy "schedules_select"
 on public.member_schedules
@@ -2128,6 +2141,8 @@ revoke all on function public.is_approved(uuid) from public;
 revoke all on function public.is_team_member(uuid, uuid) from public;
 revoke all on function public.is_team_leader(uuid, uuid) from public;
 revoke all on function public.can_view_member_schedule(uuid) from public;
+revoke all on function public.is_member_available_for_booking(uuid, date, text, text, numeric)
+  from public, anon, authenticated;
 revoke all on function public.get_member_directory() from public;
 revoke all on function public.review_profile_signup(uuid, text) from public;
 revoke all on function public.save_push_subscription(text, text, text, text) from public;

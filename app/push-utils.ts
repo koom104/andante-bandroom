@@ -46,7 +46,7 @@ const exactPushHosts = new Set([
 ]);
 
 export function isAllowedWebPushEndpoint(value: string) {
-  if (value.length < 16 || value.length > 2048) {
+  if (typeof value !== "string" || value.length < 16 || value.length > 2048) {
     return false;
   }
 
@@ -70,6 +70,8 @@ export function isAllowedWebPushEndpoint(value: string) {
 export function isValidWebPushSubscription(subscription: Pick<PushSubscriptionRecord, "endpoint" | "p256dh" | "auth_key">) {
   return (
     isAllowedWebPushEndpoint(subscription.endpoint) &&
+    typeof subscription.p256dh === "string" &&
+    typeof subscription.auth_key === "string" &&
     subscription.p256dh.length >= 40 &&
     subscription.p256dh.length <= 256 &&
     base64UrlPattern.test(subscription.p256dh) &&

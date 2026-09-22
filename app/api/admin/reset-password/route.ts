@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { rejectCrossOriginMutation } from "../../request-security";
+import { readBoundedJson } from "../../bounded-json";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -58,7 +59,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "요청이 너무 큽니다." }, { status: 413 });
   }
 
-  const body = (await request.json().catch(() => null)) as { userId?: string } | null;
   const authorization = request.headers.get("authorization") ?? "";
   const token = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
 
@@ -66,9 +66,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "관리자 세션을 확인할 수 없습니다. 새로고침 후 다시 시도해 주세요." }, { status: 401 });
   }
 
-  const targetUserId = body?.userId;
+  const parsed = await readBoundedJson(request, 4_096);
+  if (!parsed.ok) return NextResponse.json({ error: "잘못된 요청입니다." }, { status: parsed.status });
+  const targetUserId = parsed.value.userId;
 
-  if (!targetUserId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId)) {
+  if (typeof targetUserId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId)) {
     return NextResponse.json({ error: "리셋할 부원을 선택해 주세요." }, { status: 400 });
   }
 
@@ -148,7 +150,7 @@ export async function POST(request: NextRequest) {
   }
 
   const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
-  const { data: recentReset } = await adminClient
+  const { data: recentReset, error: recentResetError } = await adminClient
     .from("audit_logs")
     .select("id")
     .eq("action", "reset_password")
@@ -156,6 +158,10 @@ export async function POST(request: NextRequest) {
     .gte("created_at", oneMinuteAgo)
     .limit(1)
     .maybeSingle();
+
+  if (recentResetError) {
+    return NextResponse.json({ error: "비밀번호 발급 내역을 확인하지 못했습니다." }, { status: 503 });
+  }
 
   if (recentReset) {
     return NextResponse.json({ error: "방금 임시 비밀번호를 발급했습니다. 1분 뒤 다시 시도해 주세요." }, { status: 429 });
@@ -186,7 +192,7 @@ export async function POST(request: NextRequest) {
   });
 
   if (updateAuthError) {
-    await adminClient.from("profiles").update({ password_reset_required: false }).eq("id", targetUserId);
+    await adminClient.from("profiles").update({ password_reset_required: targetProfile.password_reset_required }).eq("id", targetUserId);
 
     if (updateAuthError.message.toLowerCase().includes("invalid api key")) {
       return NextResponse.json(

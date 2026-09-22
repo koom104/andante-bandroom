@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { sendWebPush, type PushSubscriptionRecord } from "../../../push-utils";
 import { rejectCrossOriginMutation } from "../../request-security";
+import { readBoundedJson } from "../../bounded-json";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -43,7 +44,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
 
-  const requestBody = (await request.json().catch(() => null)) as { kind?: TestPushKind } | null;
+  const parsed = await readBoundedJson(request, 1_024);
+  if (!parsed.ok) return NextResponse.json({ error: "잘못된 요청입니다." }, { status: parsed.status });
+  const requestBody = parsed.value;
   const kind: TestPushKind = requestBody?.kind === "daily_digest" ? "daily_digest" : "booking_reminder";
 
   const requesterClient = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
