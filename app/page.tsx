@@ -3,6 +3,7 @@
 import type { Session as SupabaseSession } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { supabase } from "./supabase";
+import { buildDateScheduleRows, updateDateScheduleDraft, type DateScheduleDrafts } from "./date-schedule-drafts";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
 type Tab = "booking" | "suggestions" | "calendar" | "my" | "team" | "admin";
@@ -1755,30 +1756,24 @@ export default function Home() {
     await refreshData();
   }
 
-  async function saveDateScheduleDraft(userId: string, date: string, nextBusyKeys: string[]) {
+  async function saveDateScheduleDraft(userId: string, drafts: DateScheduleDrafts) {
     if (!profile) {
-      return;
+      throw new Error("로그인이 필요합니다.");
     }
 
-    const nextBusy = new Set(nextBusyKeys);
+    const dates = Object.keys(drafts);
+    if (dates.length === 0) return;
     const { error } = await supabase.from("member_schedule_date_slots").upsert(
-      timeSlots.map((time) => ({
-        user_id: userId,
-        schedule_date: date,
-        start_time: time,
-        is_busy: nextBusy.has(dateSlotKey(date, time)),
-        updated_by: profile.id,
-        updated_at: new Date().toISOString(),
-      })),
+      buildDateScheduleRows(drafts, userId, profile.id, timeSlots, new Date().toISOString()),
       { onConflict: "user_id,schedule_date,start_time" },
     );
 
     if (error) {
       setStatus(getScheduleErrorMessage(error));
-      return;
+      throw new Error(getScheduleErrorMessage(error));
     }
 
-    setStatus(`${formatDateLabel(date)} 날짜별 시간표를 저장했어요.`);
+    setStatus(`${dates.length}개 날짜의 시간표를 저장했어요.`);
     await refreshData();
   }
 
@@ -1787,7 +1782,7 @@ export default function Home() {
 
     if (error) {
       setStatus(getScheduleErrorMessage(error));
-      return;
+      throw new Error(getScheduleErrorMessage(error));
     }
 
     setStatus(`${formatDateLabel(date)} 시간표를 고정 시간표 기준으로 되돌렸어요.`);
@@ -2388,7 +2383,7 @@ export default function Home() {
                     dateBusyByDate={dateBusyByUser[profile.id] ?? {}}
                     dateOverrideDates={dateOverrideByUser[profile.id] ?? []}
                     saveWeeklySchedule={(nextBusyKeys) => saveWeeklyScheduleDraft(profile.id, nextBusyKeys)}
-                    saveDateSchedule={(date, nextBusyKeys) => saveDateScheduleDraft(profile.id, date, nextBusyKeys)}
+                    saveDateSchedule={(drafts) => saveDateScheduleDraft(profile.id, drafts)}
                     resetDateSchedule={(date) => resetDateSchedule(profile.id, date)}
                   />
                 )}
@@ -2433,7 +2428,7 @@ export default function Home() {
                     updateTeam={updateTeam}
                     cancelBooking={cancelBooking}
                     saveWeeklySchedule={(userId, nextBusyKeys) => saveWeeklyScheduleDraft(userId, nextBusyKeys)}
-                    saveDateSchedule={(userId, date, nextBusyKeys) => saveDateScheduleDraft(userId, date, nextBusyKeys)}
+                    saveDateSchedule={(userId, drafts) => saveDateScheduleDraft(userId, drafts)}
                     resetDateSchedule={(userId, date) => resetDateSchedule(userId, date)}
                   />
                 )}
@@ -3606,7 +3601,7 @@ function MyPageTab({
   dateBusyByDate: Record<string, string[]>;
   dateOverrideDates: string[];
   saveWeeklySchedule: (nextBusyKeys: string[]) => Promise<void>;
-  saveDateSchedule: (date: string, nextBusyKeys: string[]) => Promise<void>;
+  saveDateSchedule: (drafts: DateScheduleDrafts) => Promise<void>;
   resetDateSchedule: (date: string) => Promise<void>;
 }) {
   const [scheduleScope, setScheduleScope] = useState<ScheduleScope>("weekly");
@@ -3850,11 +3845,11 @@ function MyPageTab({
           </div>
         )}
         <ScheduleGrid
+          key={profile.id}
           busy={scheduleScope === "date" ? selectedDateBusy : ownBusy}
           columns={scheduleColumns}
-          onSaveDraft={(nextBusyKeys) =>
-            scheduleScope === "date" ? saveDateSchedule(scheduleDate, nextBusyKeys) : saveWeeklySchedule(nextBusyKeys)
-          }
+          onSaveDraft={saveWeeklySchedule}
+          onSaveDateDrafts={saveDateSchedule}
           onResetDateOverride={scheduleScope === "date" && dateHasOverride ? () => resetDateSchedule(scheduleDate) : undefined}
         />
       </MobilePanel>
@@ -4564,7 +4559,7 @@ function AdminTab({
   updateTeam: (payload: UpdateTeamPayload) => Promise<void>;
   cancelBooking: (bookingId: string, reason: string) => Promise<void>;
   saveWeeklySchedule: (userId: string, nextBusyKeys: string[]) => Promise<void>;
-  saveDateSchedule: (userId: string, date: string, nextBusyKeys: string[]) => Promise<void>;
+  saveDateSchedule: (userId: string, drafts: DateScheduleDrafts) => Promise<void>;
   resetDateSchedule: (userId: string, date: string) => Promise<void>;
 }) {
   const [newGoalName, setNewGoalName] = useState("");
@@ -5095,7 +5090,7 @@ function AdminScheduleEditor({
   dateOverrideByUser: Record<string, string[]>;
   rehearsalByUser: Record<string, string[]>;
   saveWeeklySchedule: (userId: string, nextBusyKeys: string[]) => Promise<void>;
-  saveDateSchedule: (userId: string, date: string, nextBusyKeys: string[]) => Promise<void>;
+  saveDateSchedule: (userId: string, drafts: DateScheduleDrafts) => Promise<void>;
   resetDateSchedule: (userId: string, date: string) => Promise<void>;
 }) {
   const memberProfiles = profiles.filter((profile) => profile.role !== "admin");
@@ -5166,14 +5161,12 @@ function AdminScheduleEditor({
             </div>
           )}
           <ScheduleGrid
+            key={selectedProfile.id}
             busy={scheduleScope === "date" ? selectedDateBusy : ownBusy}
             columns={scheduleColumns}
             rehearsals={scheduleScope === "date" ? rehearsalByUser[selectedProfile.id] ?? [] : []}
-            onSaveDraft={(nextBusyKeys) =>
-              scheduleScope === "date"
-                ? saveDateSchedule(selectedProfile.id, scheduleDate, nextBusyKeys)
-                : saveWeeklySchedule(selectedProfile.id, nextBusyKeys)
-            }
+            onSaveDraft={(nextBusyKeys) => saveWeeklySchedule(selectedProfile.id, nextBusyKeys)}
+            onSaveDateDrafts={(drafts) => saveDateSchedule(selectedProfile.id, drafts)}
             onResetDateOverride={
               scheduleScope === "date" && dateHasOverride
                 ? () => resetDateSchedule(selectedProfile.id, scheduleDate)
@@ -5677,26 +5670,32 @@ function ScheduleGrid({
   columns,
   rehearsals = [],
   onSaveDraft,
+  onSaveDateDrafts,
   onResetDateOverride,
 }: {
   busy: string[];
   columns?: ScheduleColumn[];
   rehearsals?: string[];
   onSaveDraft: (nextBusyKeys: string[]) => Promise<void>;
+  onSaveDateDrafts?: (drafts: DateScheduleDrafts) => Promise<void>;
   onResetDateOverride?: () => Promise<void>;
 }) {
   const [selectedBandId, setSelectedBandId] = useState(timeBands[0].id);
   const [editMode, setEditMode] = useState<ScheduleEditMode | null>(null);
-  const [draftBusy, setDraftBusy] = useState<string[]>(busy);
+  const [weeklyDraftBusy, setWeeklyDraftBusy] = useState<string[]>(busy);
+  const [dateDrafts, setDateDrafts] = useState<DateScheduleDrafts>({});
+  const [saveError, setSaveError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const isPaintingRef = useRef(false);
   const selectedBand = timeBands.find((band) => band.id === selectedBandId) ?? timeBands[0];
   const gridColumns: ScheduleColumn[] = columns ?? days.map((day) => ({ label: day, day }));
   const selectedScheduleDate = gridColumns.length === 1 ? gridColumns[0].date : undefined;
+  const draftBusy = selectedScheduleDate ? dateDrafts[selectedScheduleDate] ?? busy : weeklyDraftBusy;
+  const pendingDateCount = Object.keys(dateDrafts).length;
   const timeLabelColumnWidth = gridColumns.length >= 7 ? 34 : 42;
   const gridTemplateColumns = `${timeLabelColumnWidth}px repeat(${gridColumns.length}, minmax(0, 1fr))`;
   const showsRehearsals = rehearsals.length > 0;
-  const hasChanges = !scheduleSetsEqual(draftBusy, busy);
+  const hasChanges = selectedScheduleDate ? pendingDateCount > 0 : !scheduleSetsEqual(draftBusy, busy);
   const wholeDateSlotKeys = selectedScheduleDate ? timeSlots.map((time) => dateSlotKey(selectedScheduleDate, time)) : [];
   const isWholeDateBusy = wholeDateSlotKeys.length > 0 && wholeDateSlotKeys.every((key) => draftBusy.includes(key));
   const visibleTimeSlots = timeSlots.filter((time) => {
@@ -5705,8 +5704,16 @@ function ScheduleGrid({
   });
 
   useEffect(() => {
-    setDraftBusy(busy);
-  }, [busy]);
+    if (!selectedScheduleDate) setWeeklyDraftBusy(busy);
+  }, [busy, selectedScheduleDate]);
+
+  const setDraftBusy = useCallback((update: (current: string[]) => string[]) => {
+    if (selectedScheduleDate) {
+      setDateDrafts((current) => updateDateScheduleDraft(current, selectedScheduleDate, busy, update));
+    } else {
+      setWeeklyDraftBusy(update);
+    }
+  }, [selectedScheduleDate, busy]);
 
   function getColumnKey(column: ScheduleColumn, time: string) {
     return column.date ? dateSlotKey(column.date, time) : slotKey(column.day, time);
@@ -5714,7 +5721,7 @@ function ScheduleGrid({
 
   const paintSlot = useCallback(
     (column: ScheduleColumn, time: string) => {
-      if (!editMode) {
+      if (!editMode || isSaving) {
         return;
       }
 
@@ -5734,7 +5741,7 @@ function ScheduleGrid({
         return nextBusyState ? [...current, key] : current.filter((item) => item !== key);
       });
     },
-    [editMode, rehearsals],
+    [editMode, rehearsals, isSaving, setDraftBusy],
   );
 
   const finishPainting = useCallback(() => {
@@ -5778,13 +5785,44 @@ function ScheduleGrid({
   }
 
   async function saveDraft() {
+    if (isSaving) return;
     setIsSaving(true);
-    await onSaveDraft(draftBusy);
-    setIsSaving(false);
+    setSaveError("");
+    try {
+      if (selectedScheduleDate && onSaveDateDrafts) {
+        await onSaveDateDrafts(dateDrafts);
+        setDateDrafts({});
+      } else {
+        await onSaveDraft(draftBusy);
+      }
+    } catch (error) {
+      setSaveError(getErrorMessage(error));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function resetSelectedDate() {
+    if (!onResetDateOverride || !selectedScheduleDate || isSaving) return;
+    const date = selectedScheduleDate;
+    setIsSaving(true);
+    setSaveError("");
+    try {
+      await onResetDateOverride();
+      setDateDrafts((current) => {
+        const remaining = { ...current };
+        delete remaining[date];
+        return remaining;
+      });
+    } catch (error) {
+      setSaveError(getErrorMessage(error));
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function toggleWholeDateAvailability() {
-    if (!selectedScheduleDate) {
+    if (!selectedScheduleDate || isSaving) {
       return;
     }
 
@@ -5877,14 +5915,22 @@ function ScheduleGrid({
         <span className="rounded-md bg-[#fff0eb] px-2 py-1 text-[#be3d33]">불가</span>
         {showsRehearsals && <span className="rounded-md bg-amber-50 px-2 py-1 text-amber-800">합주</span>}
       </div>
+      {selectedScheduleDate && pendingDateCount > 0 && (
+        <p className="text-xs text-slate-500" aria-live="polite">저장 대기 {pendingDateCount}개 날짜</p>
+      )}
+      {saveError && <p role="alert" className="text-xs text-red-600">{saveError}</p>}
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
-          onClick={() => setDraftBusy(busy)}
+          onClick={() => {
+            if (selectedScheduleDate) setDateDrafts({});
+            else setWeeklyDraftBusy(busy);
+            setSaveError("");
+          }}
           disabled={!hasChanges || isSaving}
           className="h-10 rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-600 disabled:bg-slate-50 disabled:text-slate-300"
         >
-          변경 취소
+          {selectedScheduleDate ? "전체 변경 취소" : "변경 취소"}
         </button>
         <button
           type="button"
@@ -5892,13 +5938,13 @@ function ScheduleGrid({
           disabled={!hasChanges || isSaving}
           className="h-10 rounded-lg bg-[#ff665a] text-xs font-semibold text-white disabled:bg-slate-100 disabled:text-slate-400"
         >
-          {isSaving ? "저장 중" : "시간표 저장"}
+          {isSaving ? "저장 중" : selectedScheduleDate && pendingDateCount > 0 ? `${pendingDateCount}개 날짜 저장` : "시간표 저장"}
         </button>
       </div>
       {onResetDateOverride && (
         <button
           type="button"
-          onClick={onResetDateOverride}
+          onClick={resetSelectedDate}
           disabled={isSaving}
           className="h-10 w-full rounded-lg border border-[#f0ded7] bg-white text-xs font-semibold text-slate-600 disabled:text-slate-300"
         >
