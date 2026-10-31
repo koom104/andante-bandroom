@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readBoundedJson } from '../app/api/bounded-json.ts';
-import { isAllowedWebPushEndpoint, isValidWebPushSubscription } from '../app/push-utils.ts';
+import { isAllowedWebPushEndpoint, isValidWebPushSubscription, sendWebPush } from '../app/push-utils.ts';
 
 function request(chunks, headers = {}) {
   const encoder = new TextEncoder();
@@ -74,4 +74,19 @@ test('rejects push endpoints outside the provider allowlist', () => {
     'https://user:password@fcm.googleapis.com/push/a',
     'https://fcm.googleapis.com:8443/push/a',
   ]) assert.equal(isAllowedWebPushEndpoint(endpoint), false);
+});
+
+test('push delivery disallows redirects and has a request timeout', async (t) => {
+  const vapid = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const jwk = await crypto.subtle.exportKey('jwk', vapid.privateKey);
+  const publicKey = Buffer.from(await crypto.subtle.exportKey('raw', vapid.publicKey)).toString('base64url');
+  const recipient = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const p256dh = Buffer.from(await crypto.subtle.exportKey('raw', recipient.publicKey)).toString('base64url');
+  let options;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => { options = init; return new Response(null, { status: 201 }); });
+  const result = await sendWebPush({ endpoint: 'https://fcm.googleapis.com/push/test', p256dh, auth_key: 'A'.repeat(22) },
+    { title: 'test', body: 'test' }, { publicKey, privateKey: jwk.d, subject: 'mailto:test@example.com' });
+  assert.equal(result.status, 201);
+  assert.equal(options.redirect, 'manual');
+  assert.ok(options.signal instanceof AbortSignal);
 });

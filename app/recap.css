@@ -1,0 +1,154 @@
+.workspace-content.recap-content { padding: 0 0 100px; background: #141612; }
+.recap-page { --recap-lime: #d4ff46; color: #f5f7ef; background: #141612; min-height: 100%; padding: 24px 18px; letter-spacing: 0; container-type: inline-size; container-name: recap; }
+.recap-page *, .recap-modal * { box-sizing: border-box; min-width: 0; }
+.recap-page button, .recap-page select, .recap-modal button, .recap-modal input { font: inherit; }
+.recap-page button, .recap-modal button { cursor: pointer; }
+.recap-page button:disabled, .recap-modal button:disabled { cursor: wait; opacity: .5; }
+.recap-page a, .recap-modal a { color: inherit; text-decoration: none; }
+.recap-page :focus-visible, .recap-modal :focus-visible { outline: 2px solid #d4ff46; outline-offset: 4px; }
+.recap-toolbar, .recap-toolbar-actions, .recap-section-heading, .recap-modal-header, .recap-team-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.recap-wordmark { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 800; }
+.recap-toolbar-actions { gap: 6px; }
+.recap-period select { color: #f5f7ef; background: #262a23; border: 1px solid #454b3e; padding: 8px; border-radius: 4px; font-size: 13px; }
+.recap-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 38px; height: 38px; border: 1px solid #454b3e; border-radius: 4px; background: #262a23; color: #f5f7ef; }
+.recap-hero { padding: 40px 0 30px; display: grid; gap: 32px; }
+.recap-kicker { color: #b5bdaa; font-size: 10px; font-weight: 700; margin: 0 0 12px; }
+.recap-hero h1 { margin: 0; font-size: 34px; line-height: 1.28; font-weight: 850; overflow-wrap: anywhere; }
+.recap-big-number { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; color: #d4ff46; margin: 16px 0 12px; }
+.recap-big-number strong { font-size: 84px; line-height: 1; font-weight: 900; }
+.recap-big-number span { font-size: 20px; font-weight: 700; }
+.recap-hero-caption { color: #bbc2b2; font-size: 14px; line-height: 1.75; margin: 0; }
+.recap-jump { display: inline-flex; gap: 10px; align-items: center; font-size: 13px; margin-top: 20px; }
+.recap-featured { position: relative; max-width: 300px; width: 100%; justify-self: center; }
+.recap-featured-art { width: 100%; aspect-ratio: 1; transform: rotate(-3deg); margin: 18px 0 24px; box-shadow: 8px 8px 0 #d4ff46; }
+.recap-art { width: 100%; height: 100%; aspect-ratio: 1; display: block; object-fit: cover; }
+.recap-art-slot { width: 100%; height: 100%; aspect-ratio: 1; }
+.recap-art-fallback { background: #d4ff46; color: #141612; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; padding: 14%; overflow: hidden; }
+.recap-art-fallback span { font-size: 24px; line-height: 1.25; font-weight: 850; overflow-wrap: anywhere; }
+.recap-art-fallback small { font-size: 9px; font-weight: 800; }
+.recap-tone-1 { background: #ff84c7; }.recap-tone-2 { background: #7fe2db; }.recap-tone-3 { background: #eee9e0; }
+.recap-featured h2 { font-size: 20px; margin: 0 0 6px; overflow-wrap: anywhere; }
+.recap-featured > p:not(.recap-kicker) { font-size: 14px; color: #c7cebe; margin: 0 0 10px; }
+.recap-source { display: flex; align-items: center; gap: 5px; color: #bfc8b4 !important; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.recap-source span { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; flex-shrink: 0; }
+.recap-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #3c4234; border-bottom: 1px solid #3c4234; padding: 20px 0; gap: 10px; }
+.recap-stats > div { display: grid; gap: 8px; }.recap-stats svg { color: #ff84c7; }.recap-stats span { font-size: 12px; color: #bfc8b4; }
+.recap-stats strong { font-size: 28px; line-height: 1.2; }.recap-stats small { font-size: 12px; font-weight: 500; margin-left: 4px; }
+.recap-months, .recap-teams { padding-top: 36px; scroll-margin-top: 20px; }
+.recap-section-heading h2 { font-size: 21px; margin: 0; }.recap-section-heading .recap-kicker { margin-bottom: 7px; }.recap-section-heading > span { color: #b5bdaa; font-size: 11px; flex-shrink: 0; }
+.recap-chart { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 5px; margin-top: 24px; }
+.recap-chart-column { display: grid; gap: 10px; text-align: center; font-size: 10px; color: #b5bdaa; }
+.recap-chart-track { height: 140px; display: flex; align-items: flex-end; border-bottom: 1px solid #454b3e; }
+.recap-chart-bar { background: #7fe2db; width: 100%; min-height: 2px; border-radius: 3px 3px 0 0; animation: recap-rise .55s ease-out both; transform-origin: bottom; }.recap-chart-peak { background: #d4ff46; }
+.recap-team-grid { display: grid; gap: 16px; margin-top: 20px; }
+.recap-team-card { border: 1px solid #3c4234; border-radius: 6px; padding: 16px; background: #1e211b; transition: border-color .2s, transform .2s; }
+.recap-team-card:hover { border-color: #8b9a76; transform: translateY(-2px); }
+.recap-track-number { color: #d4ff46; font-size: 14px; font-weight: 800; display: flex; justify-content: space-between; margin-bottom: 16px; }.recap-track-number span { color: #b5bdaa; font-size: 12px; font-weight: 400; }
+.recap-team-main { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 16px; align-items: center; }
+.recap-team-cover { aspect-ratio: 1; }.recap-team-cover .recap-art-fallback span { font-size: 14px; }.recap-team-cover .recap-art-fallback svg { width: 16px; height: 16px; }.recap-team-cover .recap-art-fallback small { display: none; }
+.recap-team-copy h3 { font-size: 17px; line-height: 1.35; margin: 0 0 5px; overflow-wrap: anywhere; }.recap-team-copy p { color: #b5bdaa; font-size: 11px; margin: 0 0 8px; overflow-wrap: anywhere; }.recap-team-copy strong { font-size: 17px; }
+.recap-team-meter { height: 3px; background: #3c4234; margin-top: 10px; }.recap-team-meter span { display: block; height: 100%; background: #ff84c7; }
+.recap-team-card > .recap-source { margin-top: 14px; flex-wrap: wrap; }
+.recap-team-actions { border-top: 1px solid #3c4234; margin-top: 16px; padding-top: 12px; }.recap-team-actions button { display: flex; align-items: center; gap: 5px; background: none; color: #dce2d3; border: 0; padding: 4px 0; font-size: 12px; }
+.recap-footer { margin-top: 42px; padding-top: 20px; border-top: 1px solid #3c4234; color: #a3ad97; font-size: 11px; line-height: 1.7; }.recap-footer span { font-size: 10px; }.recap-footer p { margin: 7px 0 0; }
+.recap-state { min-height: 400px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px; }.recap-state h1, .recap-state h2 { font-size: 22px; margin: 0; }.recap-state p { color: #bfc8b4; font-size: 14px; line-height: 1.7; margin: 0; }
+.recap-primary, .recap-secondary { background: #d4ff46; color: #141612; border: 0; border-radius: 4px; padding: 12px 18px; font-weight: 700; }.recap-secondary { display: block; width: 100%; background: #30372a; color: #f5f7ef; margin-top: 18px; }
+.recap-modal { background: #1e211b; color: #f5f7ef; border: 1px solid #505b43; border-radius: 8px; width: min(560px, calc(100% - 28px)); max-height: 85dvh; overflow: auto; padding: 22px; margin: auto; }.recap-modal::backdrop { background: #000b; }
+.recap-modal-header { margin-bottom: 18px; }.recap-modal-header h2 { font-size: 19px; margin: 0; overflow-wrap: anywhere; }
+.recap-history-total { color: #d4ff46; font-size: 22px; margin-bottom: 12px; }.recap-history-row { display: flex; justify-content: space-between; gap: 16px; padding: 15px 0; border-bottom: 1px solid #3c4234; }.recap-history-row strong { font-size: 14px; }.recap-history-row p { color: #b5bdaa; font-size: 12px; margin: 5px 0 0; }.recap-history-row > div:last-child { text-align: right; flex-shrink: 0; }
+.recap-status { color: #b5bdaa; font-size: 13px; line-height: 1.6; }.recap-error { color: #ffb6bc; font-size: 13px; line-height: 1.6; }
+.recap-search { display: flex; align-items: flex-end; gap: 10px; margin: 16px 0; }.recap-search label { display: grid; gap: 8px; flex: 1; font-size: 12px; }.recap-search input { width: 100%; border: 1px solid #505b43; border-radius: 4px; background: #141612; color: #f5f7ef; padding: 10px; font-size: 16px; }.recap-search .recap-icon-button { height: 44px; width: 44px; }
+.recap-search-result { display: grid; grid-template-columns: 52px minmax(0, 1fr) 38px; gap: 12px; align-items: center; padding: 14px 0; border-bottom: 1px solid #3c4234; }.recap-search-result > .recap-art { height: 52px; }.recap-search-result strong { font-size: 14px; overflow-wrap: anywhere; }.recap-search-result p { font-size: 12px; color: #b5bdaa; margin: 5px 0; }.recap-search-result a { font-size: 11px; display: inline-flex; gap: 4px; align-items: center; }
+.recap-loading { animation: recap-spin 1.2s linear infinite; }
+.recap-story-panel { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.recap-view-toggle { display: flex; gap: 2px; background: #262a23; border: 1px solid #454b3e; border-radius: 4px; padding: 2px; flex-shrink: 0; }
+.recap-view-toggle button { border: 0; border-radius: 2px; background: transparent; color: #bfc8b4; font-size: 12px; white-space: nowrap; padding: 7px 8px; }
+.recap-view-toggle button[aria-pressed="true"] { background: #d4ff46; color: #141612; font-weight: 750; }
+.workspace-content:has(> .recap-summary-page) { overflow: hidden; }
+.recap-page.recap-summary-page { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; }
+.recap-summary-page > .recap-toolbar { flex-shrink: 0; gap: 6px; flex-wrap: nowrap; }
+.recap-summary-page .recap-toolbar-actions { gap: 4px; }
+.recap-summary-page .recap-period select { max-width: 112px; padding: 7px 4px; font-size: 12px; }
+.recap-summary-page .recap-icon-button { width: 32px; height: 34px; }
+.recap-summary-body { flex: 1; min-height: 0; display: flex; justify-content: center; }
+.recap-summary-body .recap-story-deck { height: 100%; width: 100%; min-height: 0; gap: 8px; }
+.recap-summary-body .recap-story-pagination { flex-shrink: 0; }
+.recap-summary-body .recap-story-slide { flex: 1; min-height: 0; width: 100%; gap: 8px; }
+.recap-summary-body .recap-story-image-frame { flex: 1; min-height: 0; width: 100%; display: flex; justify-content: center; }
+.recap-summary-body .recap-story-preview { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
+.recap-summary-body .recap-story-actions { flex-shrink: 0; }
+.recap-summary-body .recap-story-actions > a, .recap-summary-body .recap-story-actions > button { padding: 8px 14px; }
+.recap-summary-page .recap-state { flex: 1; min-height: 0; }
+.recap-story-modal { width: 100%; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; padding: 10px 12px; overflow: hidden; }
+.recap-story-modal[open] { display: flex; flex-direction: column; gap: 8px; }
+.recap-story-modal .recap-modal-header { margin: 0; flex-shrink: 0; }
+.recap-story-modal .recap-modal-header h2 { font-size: 15px; }
+.recap-story-modal > .recap-story-deck { flex: 1; min-height: 0; width: 100%; gap: 8px; }
+.recap-story-modal .recap-story-pagination, .recap-story-modal .recap-story-actions { flex-shrink: 0; }
+.recap-story-modal .recap-story-slide { flex: 1; min-height: 0; width: 100%; gap: 8px; }
+.recap-story-modal .recap-story-image-frame { flex: 1; min-height: 0; width: 100%; display: flex; justify-content: center; }
+.recap-story-modal .recap-story-preview { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
+.recap-story-modal .recap-story-actions > a, .recap-story-modal .recap-story-actions > button { padding: 8px 14px; }
+.recap-story-preview { display: block; width: auto; height: auto; max-width: 100%; max-height: max(100px, calc(85dvh - 230px)); aspect-ratio: 9 / 16; object-fit: contain; }
+.recap-story-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; width: 100%; font-size: 13px; }
+.recap-story-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.recap-story-actions > a, .recap-story-actions > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin: 0; width: auto; font-size: 13px; }
+.recap-story-actions > a.recap-primary { background: #e8ecec; color: #202b35; border: 1px solid #bdc6c6; }
+.recap-story-actions > a.recap-primary:hover { background: #ffffff; }
+.recap-background-dialog[open] { display: flex; flex-direction: column; max-height: 80dvh; overflow: hidden; }
+.recap-background-dialog .recap-modal-header { flex-shrink: 0; }
+.recap-background-list { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+.recap-background-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 8px; border: 0; border-bottom: 1px solid #8b9baa30; border-radius: 0; background: transparent; color: #213442; text-align: left; }
+.recap-background-option[aria-pressed="true"] { background: #dce6f080; box-shadow: inset 3px 0 0 #7088a2; }
+.recap-background-option:hover { background: #ffffff80; }
+.recap-background-art { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; overflow: hidden; border-radius: 4px; background: #dce3e8; color: #627586; }
+.recap-background-art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.recap-background-copy { flex: 1; min-width: 0; }
+.recap-background-copy strong, .recap-background-copy small { display: block; overflow-wrap: anywhere; }
+.recap-background-copy strong { font-size: 14px; line-height: 20px; }
+.recap-background-copy small { margin-top: 3px; font-size: 12px; line-height: 18px; color: #596c7c; }
+.recap-background-option > svg { flex-shrink: 0; }
+@media (max-width: 480px) {
+  .recap-story-actions { gap: 6px; }
+  .recap-summary-body .recap-story-actions > a, .recap-summary-body .recap-story-actions > button,
+  .recap-story-modal .recap-story-actions > a, .recap-story-modal .recap-story-actions > button { gap: 5px; padding: 8px; font-size: 12px; }
+}
+@container recap (max-width: 340px) { .recap-wordmark { font-size: 9px; gap: 4px; }.recap-wordmark svg { width: 14px; }.recap-toolbar { flex-wrap: wrap; }.recap-hero h1 { font-size: 30px; }.recap-big-number strong { font-size: 68px; } }
+@keyframes recap-spin { to { transform: rotate(360deg); } } @keyframes recap-rise { from { transform: scaleY(.05); } to { transform: scaleY(1); } }
+@container recap (min-width: 600px) { .recap-hero { grid-template-columns: minmax(0, 1fr) 240px; align-items: center; gap: 36px; padding: 48px 0; }.recap-hero h1 { font-size: 40px; }.recap-big-number strong { font-size: 100px; }.recap-team-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.recap-stats > div { grid-template-columns: 24px 1fr; align-items: center; }.recap-stats strong { grid-column: 2; }.recap-chart { gap: 12px; }.recap-chart-track { height: 180px; } }
+@media (min-width: 1024px) { .workspace-content.recap-content { padding-bottom: 0; }.recap-page { padding: 32px 40px; }.recap-wordmark { font-size: 13px; } }
+@media (prefers-reduced-motion: reduce) { .recap-page *, .recap-modal * { animation: none !important; transition: none !important; } }
+
+/* Glass surfaces remain static so viewing the recap needs no continuous rendering. */
+.workspace-content.recap-content { background: #e8eff1; }
+.recap-page { position: relative; isolation: isolate; background: #e8eff1; color: #213442; }
+.recap-page::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: var(--recap-cover, none); background-size: cover; background-position: center; opacity: .18; filter: blur(24px); }
+.recap-page :focus-visible, .recap-modal :focus-visible { outline-color: #247387; }
+.recap-icon-button, .recap-period select, .recap-view-toggle, .recap-team-card, .recap-modal { color: #213442; border-color: #ffffff75; background: #ffffff5c; -webkit-backdrop-filter: blur(24px) saturate(140%); backdrop-filter: blur(24px) saturate(140%); box-shadow: inset 0 0 0 .5px #ffffff5c, 0 5px 18px #29475912; }
+.recap-icon-button, .recap-period select, .recap-view-toggle { border-radius: 8px; }
+.recap-icon-button:hover { background: #ffffffcc; }
+.recap-view-toggle button { color: #526570; border-radius: 5px; }
+.recap-view-toggle button[aria-pressed="true"] { background: #ffffffad; color: #205364; box-shadow: 0 2px 7px #29475917, inset 0 0 0 .5px #ffffff80; }
+.recap-kicker, .recap-hero-caption, .recap-featured > p:not(.recap-kicker), .recap-stats span, .recap-section-heading > span, .recap-chart-column, .recap-track-number span, .recap-team-copy p, .recap-footer, .recap-state p, .recap-status, .recap-history-row p { color: #526570; }
+.recap-source { color: #456371 !important; }
+.recap-big-number, .recap-track-number, .recap-history-total { color: #276b7e; }
+.recap-featured-art { box-shadow: 6px 6px 0 #ffffffb3, 0 10px 30px #2947591f; }
+.recap-team-card { border-radius: 8px; }
+.recap-team-card:hover { border-color: #fff; }
+.recap-team-actions button { color: #315663; }
+.recap-stats, .recap-chart-track, .recap-team-actions, .recap-history-row, .recap-footer, .recap-search-result { border-color: #68839133; }
+.recap-stats svg { color: #6e5a89; }
+.recap-chart { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.recap-chart-bar, .recap-team-meter span { background: #80bdbe; }
+.recap-chart-peak { background: #387d96; }
+.recap-team-meter { background: #738e9d29; }
+.recap-page .recap-primary, .recap-modal .recap-primary, .recap-secondary { background: #ffffffad; color: #213442; border: 1px solid #ffffffdf; box-shadow: inset 0 1px 0 #fff, 0 2px 8px #2947590d; }
+.recap-story-actions > a.recap-primary { background: #ffffffad; color: #213442; border-color: #ffffffdf; -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+.recap-modal { background: #f1f6f7ed; }
+.recap-modal::backdrop { background: #29475945; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.recap-story-modal { background: #e8eff1f5; }
+.recap-search input { background: #ffffffa6; border-color: #ffffffdf; color: #213442; }
+.recap-error { color: #993d49; }
+.recap-art-fallback { align-items: center; justify-content: center; background: #ffffff6b; color: #617482; border: 1px solid #ffffffad; }
+@supports not (backdrop-filter: blur(1px)) { .recap-icon-button, .recap-period select, .recap-view-toggle, .recap-team-card { background: #f5f8f9; } }
+@media (prefers-reduced-transparency: reduce) { .recap-page::before { display: none; }.recap-icon-button, .recap-period select, .recap-view-toggle, .recap-team-card, .recap-modal { backdrop-filter: none; -webkit-backdrop-filter: none; background: #f5f8f9; } }

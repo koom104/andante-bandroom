@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sendWebPush, type PushSubscriptionRecord } from "../../../push-utils";
 import { rejectCrossOriginMutation } from "../../request-security";
 import { readBoundedJson } from "../../bounded-json";
+import { pushDeliveryError } from "../../../push-delivery-error";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://inlddwyoesmvmxkcuhwd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -67,13 +68,13 @@ export async function POST(request: NextRequest) {
 
   const { data: profile, error: profileError } = await requesterClient
     .from("profiles")
-    .select("id,name,status")
+    .select("id,name,status,password_reset_required")
     .eq("id", userData.user.id)
     .maybeSingle();
   if (profileError) {
     return NextResponse.json({ error: "부원 승인 상태를 확인하지 못했습니다." }, { status: 500 });
   }
-  if (!profile || profile.status !== "approved") {
+  if (!profile || profile.status !== "approved" || profile.password_reset_required) {
     return NextResponse.json({ error: "승인된 부원만 테스트 알림을 받을 수 있습니다." }, { status: 403 });
   }
 
@@ -95,6 +96,8 @@ export async function POST(request: NextRequest) {
   }
 
   let sent = 0;
+  let failedStatus: number | null = null;
+  let failedReason: string | undefined;
   const payload =
     kind === "daily_digest"
       ? {
@@ -111,7 +114,10 @@ export async function POST(request: NextRequest) {
         };
 
   for (const subscription of activeSubscriptions) {
-    const response = await sendWebPush(subscription, payload, config).catch(() => null);
+    const response = await sendWebPush(subscription, payload, config).catch((error) => {
+      console.error("Test push request failed", { subscriptionId: subscription.id, errorType: error instanceof Error ? error.name : "UnknownError" });
+      return null;
+    });
 
     if (response?.status === 404 || response?.status === 410) {
       await requesterClient.rpc("disable_my_push_subscription", { p_subscription_id: subscription.id });
@@ -119,11 +125,19 @@ export async function POST(request: NextRequest) {
 
     if (response?.ok) {
       sent += 1;
+    } else if (response) {
+      failedStatus = response.status;
+      const details = await response.json().catch(() => null) as { reason?: unknown } | null;
+      const knownReasons = ["VapidPkHashMismatch", "BadJwtToken", "BadTtl", "BadUrgency", "BadPayload", "BadEncryptionHeader", "BadCryptoKey", "Unregistered"];
+      failedReason = typeof details?.reason === "string" && knownReasons.includes(details.reason) ? details.reason : undefined;
+      // Do not log endpoints, encryption keys, or arbitrary provider response bodies.
+      console.error("Test push provider rejected request", { subscriptionId: subscription.id, status: response.status, reason: failedReason });
     }
   }
 
   if (sent === 0) {
-    return NextResponse.json({ error: "알림 발송에 실패했습니다. 브라우저 알림 권한을 다시 확인해 주세요." }, { status: 500 });
+    const failure = pushDeliveryError(failedStatus, failedReason);
+    return NextResponse.json({ error: failure.error, code: failure.code, providerStatus: failedStatus }, { status: failure.status });
   }
 
   return NextResponse.json({ ok: true, sent, kind, recipient: profile.name });

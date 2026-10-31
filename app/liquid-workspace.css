@@ -1,0 +1,419 @@
+/* Glass belongs to navigation and controls, not every section. */
+.loading-screen {
+  display: grid;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top, 0px)) 24px max(24px, env(safe-area-inset-bottom, 0px));
+  background: #f0f4f3;
+  color: #283c38;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  text-align: center;
+}
+.loading-screen-content { display: flex; flex-direction: column; align-items: center; gap: 18px; max-width: 100%; }
+.loading-brand-glass {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border: 1px solid rgba(255, 255, 255, .96);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .52);
+  box-shadow: 0 12px 32px rgba(42, 66, 60, .1), inset 1px 1px 0 #fff, inset -1px -1px 0 rgba(255, 255, 255, .5);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+.loading-brand-glass img { width: 56px; height: 56px; border-radius: 6px; }
+.loading-screen h1 { margin: 4px 0 0; font-size: 26px; line-height: 34px; font-weight: 700; letter-spacing: 0; }
+.loading-status { display: flex; align-items: center; justify-content: center; gap: 9px; min-width: 0; color: #647872; font-size: 13px; line-height: 21px; }
+.loading-status span { min-width: 0; overflow-wrap: anywhere; }
+.loading-status-spinner { flex-shrink: 0; animation: loading-status-spin 1.2s linear infinite; }
+.workspace-refresh-status {
+  justify-content: flex-start;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, .9);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .6);
+  box-shadow: inset 0 1px 0 #fff;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+@keyframes loading-status-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .loading-status-spinner { animation: none; } }
+@media (prefers-reduced-transparency: reduce) {
+  .loading-brand-glass, .workspace-refresh-status {
+    background: #fafcfb;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+.liquid-workspace {
+  --glass-edge: rgba(255, 255, 255, .92);
+  --glass-line: rgba(58, 69, 78, .1);
+  --glass-fill: rgba(255, 255, 255, .48);
+  --glass-shadow: 0 8px 28px rgba(35, 48, 58, .08), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 rgba(255, 255, 255, .5);
+  background: #edf1f2;
+  color: #20282d;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  letter-spacing: 0;
+}
+
+.liquid-workspace .workspace-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  background: #f3f5f5;
+  box-shadow: none;
+}
+
+.liquid-workspace .workspace-header-layer {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  z-index: 3;
+  min-width: 0;
+  pointer-events: none;
+}
+.liquid-workspace .workspace-header-layer > * { pointer-events: auto; }
+
+.liquid-workspace .workspace-header {
+  position: relative;
+  z-index: 2;
+  padding: max(14px, env(safe-area-inset-top, 0px)) 20px 12px;
+  background: rgba(249, 251, 251, .48);
+  border-bottom: 1px solid var(--glass-line);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .9), 0 4px 16px rgba(33, 55, 51, .035);
+  -webkit-backdrop-filter: blur(18px) saturate(165%);
+  backdrop-filter: blur(18px) saturate(165%);
+}
+
+.liquid-workspace .workspace-header > div > div > p {
+  color: #57716d;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 700;
+}
+
+.liquid-workspace .workspace-header h2 {
+  margin-top: 2px;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 750;
+}
+
+.liquid-workspace .workspace-header > p {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #6b747a;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.liquid-workspace .workspace-header button {
+  flex-direction: row;
+  gap: 10px;
+  min-width: 80px;
+  height: 40px;
+  padding-inline: 12px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  color: #35413f;
+  box-shadow: var(--glass-shadow);
+}
+
+.liquid-workspace .workspace-content {
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
+  min-width: 0;
+  padding-inline: 20px;
+  padding-top: calc(var(--workspace-header-height, 112px) + 16px);
+  scroll-padding-top: calc(var(--workspace-header-height, 112px) + 16px);
+}
+
+.liquid-workspace .workspace-panel {
+  padding: 12px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.liquid-workspace .workspace-panel > h3 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 700;
+  color: #283431;
+}
+
+.liquid-workspace .function-group {
+  overflow: hidden;
+  border: 1px solid rgba(168, 184, 183, .28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .7);
+  box-shadow: inset 0 1px 0 #fff, 0 3px 10px rgba(28, 49, 46, .035);
+}
+.liquid-workspace .function-group.function-group-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.liquid-workspace .function-group > :is(div, article) {
+  margin-block: 0;
+  padding: 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.liquid-workspace .function-group > :is(div, article) + :is(div, article) {
+  border-top: 1px solid rgba(128, 148, 144, .16);
+}
+.liquid-workspace .function-group > .reservation-detail-card:has(.bg-\[\#ff665a\]) {
+  background: rgba(255, 241, 237, .48);
+}
+.liquid-workspace :is(.mypage-schedule, .calendar-panel, .mypage-push, .admin-schedule) {
+  padding: 16px;
+  border: 1px solid rgba(168, 184, 183, .28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .68);
+  box-shadow: inset 0 1px 0 #fff;
+}
+
+.liquid-workspace :is(.reservation-detail-card, .booking-slot-row) {
+  border-color: rgba(130, 147, 150, .22);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(30, 50, 55, .025), inset 0 1px 0 rgba(255, 255, 255, .9);
+}
+
+.liquid-workspace :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  border-color: #dbe2e2;
+  background-color: rgba(255, 255, 255, .84);
+  box-shadow: inset 0 1px 2px rgba(29, 45, 49, .025);
+}
+
+.liquid-workspace :is(button, a):focus-visible {
+  outline: 2px solid #40746d;
+  outline-offset: 3px;
+}
+
+.liquid-workspace .workspace-navigation {
+  z-index: 5;
+  border: 1px solid var(--glass-edge);
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow), inset 1px 0 0 rgba(255, 255, 255, .65);
+  -webkit-backdrop-filter: blur(16px) saturate(175%);
+  backdrop-filter: blur(16px) saturate(175%);
+}
+
+.liquid-workspace .workspace-navigation .workspace-nav-icon { display: block; }
+
+.liquid-workspace .workspace-nav-grid { position: relative; }
+.liquid-workspace .workspace-nav-lens {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, .8);
+  background: rgba(225, 235, 232, .86);
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 rgba(255, 255, 255, .5), 0 2px 6px rgba(30, 55, 48, .07);
+  transition: transform 260ms cubic-bezier(.22, .8, .25, 1);
+}
+
+.liquid-workspace .workspace-nav-item {
+  position: relative;
+  color: #6b7476;
+  background: transparent;
+  font-weight: 600;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.liquid-workspace .workspace-nav-item[aria-current="page"] {
+  background: transparent;
+  color: #285e54;
+  box-shadow: none;
+}
+
+@media (max-width: 1023px) {
+  .liquid-workspace { padding: 0; }
+  .liquid-workspace .workspace-frame { max-width: none; }
+  .liquid-workspace .workspace-shell { max-width: 680px; }
+  .liquid-workspace .workspace-navigation {
+    inset-inline: 12px;
+    bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    padding: 5px;
+    border-radius: 28px;
+  }
+  .liquid-workspace .workspace-nav-grid { gap: 2px; }
+  .liquid-workspace .workspace-nav-lens {
+    width: calc((100% - (var(--tab-count) - 1) * 2px) / var(--tab-count));
+    height: 54px;
+    border-radius: 23px;
+    transform: translateX(calc(var(--active-index) * (100% + 2px)));
+  }
+  .liquid-workspace .workspace-nav-item {
+    height: 54px;
+    min-width: 0;
+    gap: 4px;
+    padding: 4px 0;
+    border-radius: 23px;
+    font-size: 10px;
+    line-height: 13px;
+    white-space: nowrap;
+  }
+  .liquid-workspace .workspace-navigation .workspace-nav-icon { width: 20px; height: 20px; }
+  .liquid-workspace .workspace-content {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    scroll-padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (min-width: 1024px) {
+  .liquid-workspace { padding: 0; }
+  .liquid-workspace .workspace-frame { max-width: 1680px; }
+  .liquid-workspace .workspace-shell {
+    grid-template-columns: 210px minmax(0, 1fr);
+    background: #f3f5f5;
+  }
+  .liquid-workspace .workspace-header-layer { grid-column: 2; }
+  .liquid-workspace .workspace-header { padding: 22px 32px 16px; }
+  .liquid-workspace .workspace-header > div > div > p { display: none; }
+  .liquid-workspace .workspace-content {
+    grid-column: 2;
+    padding: calc(var(--workspace-header-height, 104px) + 24px) 32px 32px;
+  }
+  .liquid-workspace .workspace-navigation {
+    grid-row: 1;
+    margin: 14px 0 14px 14px;
+    padding: 22px 12px;
+    border-radius: 24px;
+  }
+  .liquid-workspace .workspace-brand { padding: 0 8px 28px; }
+  .liquid-workspace .workspace-brand p { color: #283c38; font-size: 20px; }
+  .liquid-workspace .workspace-brand span { color: #7c8986; }
+  .liquid-workspace .workspace-nav-grid { gap: 6px; }
+  .liquid-workspace .workspace-nav-lens {
+    width: 100%;
+    height: 46px;
+    border-radius: 22px;
+    transform: translateY(calc(var(--active-index) * 52px));
+  }
+  .liquid-workspace .workspace-nav-item {
+    height: 46px;
+    padding: 0 14px;
+    border-radius: 22px;
+    font-size: 14px;
+  }
+  .liquid-workspace .reservation-controls {
+    padding: 0 24px 0 0;
+    border: 0;
+    border-right: 1px solid var(--glass-line);
+    border-radius: 0;
+    background: transparent;
+  }
+  .liquid-workspace :is(.calendar-details, .team-directory) {
+    border-left: 1px solid var(--glass-line);
+    padding-left: 24px;
+  }
+}
+
+.liquid-workspace .workspace-content.recap-content {
+  padding-top: var(--workspace-header-height, 112px);
+}
+
+.admin-cancellation-layout { display: grid; gap: 20px; min-width: 0; }
+.three-week-calendar { min-width: 0; }
+.three-week-calendar-cell { overflow: hidden; }
+.three-week-calendar-day { flex-shrink: 1; }
+.liquid-workspace .three-week-calendar-day > span:first-child { font-size: 12px; }
+.schedule-cell-grid { touch-action: auto; -webkit-touch-callout: none; }
+.schedule-cell-grid[data-painting="true"] { cursor: crosshair; }
+.liquid-workspace .mypage-layout { display: grid; gap: 16px; }
+.liquid-workspace .mypage-layout > .workspace-panel {
+  min-width: 0;
+  margin-block: 0 !important;
+  padding: 16px;
+  border: 1px solid rgba(157, 176, 172, .32);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .72);
+  box-shadow: inset 0 1px 0 #fff;
+}
+.liquid-workspace .mypage-layout > .workspace-panel > h3 {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(128, 148, 144, .16);
+}
+.liquid-workspace .mypage-leaderboard { padding-inline: 0; border: 0; border-radius: 0; background: transparent; }
+.liquid-workspace .mypage-membership-list > div { margin: 0; padding: 12px 0; border: 0; border-radius: 0; background: transparent; }
+.liquid-workspace .mypage-membership-list > div + div { border-top: 1px solid rgba(128, 148, 144, .16); }
+.liquid-workspace .admin-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.liquid-workspace .admin-layout > * { min-width: 0; margin-block: 0 !important; }
+.liquid-workspace .admin-layout > .workspace-panel:not(.admin-summary) {
+  padding: 16px;
+  border: 1px solid rgba(157, 176, 172, .32);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .72);
+  box-shadow: inset 0 1px 0 #fff;
+}
+.liquid-workspace .admin-layout > .workspace-panel:not(.admin-summary) > h3 {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(128, 148, 144, .16);
+}
+.liquid-workspace .admin-layout :is(.function-group, .admin-record-list) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.liquid-workspace .admin-record-list > div {
+  margin-block: 0;
+  padding: 12px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.liquid-workspace .admin-record-list > div + div { border-top: 1px solid rgba(128, 148, 144, .16); }
+.liquid-workspace .admin-layout .function-group > :is(div, article) { padding-inline: 0; }
+.liquid-workspace .admin-layout .min-h-16 { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.liquid-workspace .admin-layout .grid-cols-7 > div > button[aria-pressed] { width: 100%; max-width: 40px; padding-inline: 0; }
+.admin-cancellation-layout > * { min-width: 0; }
+.admin-cancellation-calendar button[aria-pressed="true"] {
+  border-color: transparent;
+  background: #e1ece8;
+}
+@media (min-width: 1024px) {
+  .liquid-workspace .admin-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .liquid-workspace .admin-layout > .workspace-panel:not(.admin-summary) { padding: 20px; }
+  .admin-cancellations { grid-column: 1 / -1; }
+  .admin-cancellation-layout { grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 28px; }
+  .admin-cancellation-list { padding-left: 28px; border-left: 1px solid var(--glass-line); }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .liquid-workspace .workspace-header,
+  .liquid-workspace .workspace-navigation { background: #f8faf9; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .liquid-workspace { --glass-fill: #fafcfb; }
+  .liquid-workspace .workspace-header,
+  .liquid-workspace .workspace-navigation {
+    background: #fafcfb;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-workspace .workspace-nav-item,
+  .liquid-workspace .workspace-nav-lens { transition: none; }
+}

@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { rejectUnsupportedRequest } from "./request-policy";
 import { buildBookingPushPayload, sendWebPush, type PushBooking, type PushSubscriptionRecord, type PushTeam } from "../app/push-utils";
 
 interface Env {
@@ -66,14 +67,15 @@ function withSecurityHeaders(response: Response, request: Request, env: Env) {
   const csp = [
     "default-src 'self'",
     "base-uri 'self'",
-    `connect-src 'self' ${supabaseOrigin} ${supabaseOrigin.replace("https://", "wss://")}`,
+    `connect-src 'self' ${supabaseOrigin} ${supabaseOrigin.replace("https://", "wss://")} https://itunes.apple.com`,
     "font-src 'self' data:",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https://*.mzstatic.com",
     "manifest-src 'self'",
     "object-src 'none'",
     "script-src 'self' 'unsafe-inline'",
+    "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
     "worker-src 'self'",
   ].join("; ");
@@ -394,6 +396,8 @@ async function sendThirtyMinuteReminders(env: Env, scheduledTime: number) {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const rejection = rejectUnsupportedRequest(request);
+    if (rejection) return withSecurityHeaders(rejection, request, env);
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];

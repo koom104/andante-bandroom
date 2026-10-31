@@ -112,13 +112,13 @@ export async function POST(request: NextRequest) {
 
   const { data: requesterProfile, error: requesterError } = await requesterClient
     .from("profiles")
-    .select("id,status,role")
+    .select("id,status,role,password_reset_required")
     .eq("id", userData.user.id)
     .maybeSingle();
   if (requesterError) {
     return NextResponse.json({ error: "부원 권한을 확인하지 못했습니다." }, { status: 500 });
   }
-  if (!requesterProfile || requesterProfile.status !== "approved") {
+  if (!requesterProfile || requesterProfile.status !== "approved" || requesterProfile.password_reset_required) {
     return NextResponse.json({ error: "승인된 부원만 알림을 보낼 수 있습니다." }, { status: 403 });
   }
 

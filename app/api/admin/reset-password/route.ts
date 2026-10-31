@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
 
   const { data: requesterProfile, error: requesterProfileError } = await adminClient
     .from("profiles")
-    .select("role,status")
+    .select("role,status,password_reset_required")
     .eq("id", requesterData.user.id)
     .maybeSingle();
 
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "로그인 계정의 프로필을 찾을 수 없습니다." }, { status: 404 });
   }
 
-  if (!["admin", "manager"].includes(requesterProfile.role) || requesterProfile.status !== "approved") {
+  if (!["admin", "manager"].includes(requesterProfile.role) || requesterProfile.status !== "approved" || requesterProfile.password_reset_required) {
     return NextResponse.json({ error: "관리 권한 계정만 비밀번호를 리셋할 수 있습니다." }, { status: 403 });
   }
 

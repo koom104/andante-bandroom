@@ -196,6 +196,10 @@ export async function sendWebPush(subscription: PushSubscriptionRecord, payload:
   const body = await encryptPushPayload(subscription, payload);
   return fetch(subscription.endpoint, {
     method: "POST",
+    // Workers does not implement "error". Manual still prevents credentials
+    // and encrypted payloads from following a provider redirect elsewhere.
+    redirect: "manual",
+    signal: AbortSignal.timeout(10_000),
     headers: {
       authorization: `vapid t=${vapidToken}, k=${config.publicKey}`,
       "content-encoding": "aes128gcm",

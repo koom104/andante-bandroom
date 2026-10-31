@@ -1,0 +1,10 @@
+# Only browser assets belong in the public deployment.
+.vite/
+.git/
+.env*
+node_modules/
+**/*.map
+**/*.php
+**/*.phtml
+**/*.phar
+**/*.sql

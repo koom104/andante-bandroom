@@ -1,0 +1,113 @@
+/* System-only appearance; recap artwork keeps its own export palette. */
+:root { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+.workspace-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.appearance-toggle { display: grid; grid-template-columns: repeat(3, 28px); padding: 3px; border: 1px solid #d7d7dc; border-radius: 18px; background: #eeeeef; }
+.liquid-workspace .workspace-header .appearance-option {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; min-width: 0; height: 28px; padding: 0; border: 0;
+  border-radius: 50%; background: transparent; color: #67676e; box-shadow: none;
+  font-size: 12px; font-weight: 700;
+}
+.liquid-workspace .workspace-header .appearance-option[aria-pressed="true"] { background: #fff; color: #202020; box-shadow: 0 1px 3px #0002; }
+@media (max-width: 380px) {
+  .liquid-workspace .workspace-header .workspace-signout { min-width: 36px; width: 36px; padding: 0; }
+  .liquid-workspace .workspace-header .workspace-signout span { display: none; }
+}
+
+.app-viewport :is(.bg-emerald-50, [class~="bg-[#e1ece8]"]):not(:where(.recap-page *)) { background-color: #e9e9ed; }
+.app-viewport .text-emerald-700 { color: #42424a; }
+.app-viewport :is(.border-emerald-100, .border-emerald-200) { border-color: #c8c8ce; }
+.app-viewport .bg-emerald-600 { background-color: #55555f; }
+.app-viewport .border-emerald-600 { border-color: #55555f; }
+.liquid-workspace .workspace-nav-lens { background: rgba(228, 228, 234, .86); }
+.liquid-workspace .workspace-nav-item[aria-current="page"] { color: #3c3c46; }
+.liquid-workspace .workspace-header > div > div > p,
+.liquid-workspace .workspace-brand p,
+.liquid-workspace .workspace-panel > h3 { color: #34343b; }
+.liquid-workspace :is(button, a):focus-visible { outline-color: #71717c; }
+
+:root[data-theme="dark"] {
+  & { --background: #000; --foreground: #efefef; }
+  .app-viewport {
+    --night-surface: #141414;
+    --night-line: #303030;
+    --night-accent: #bbc9d8;
+    --night-accent-fill: #202830;
+    --night-accent-line: #3e4853;
+    background: #000;
+    color: #efefef;
+  }
+  .app-viewport :is(.bg-white, .bg-white\/88, .bg-slate-50, .bg-slate-100,
+    [class~="bg-[#fffaf8]"], [class~="bg-[#fff8f4]"], [class~="bg-[#f9ebe6]"]):not(:where(.recap-page *)) {
+    background-color: var(--night-surface);
+  }
+  .app-viewport :is(.text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700):not(:where(.recap-page *)) { color: #e9e9ed; }
+  .app-viewport :is(.text-slate-600, .text-slate-500, .text-slate-400):not(:where(.recap-page *)) { color: #b8b8c0; }
+  .app-viewport :is(.text-slate-300):not(:where(.recap-page *)) { color: #898992; }
+  .app-viewport :is([class~="text-[#be3d33]"], [class~="text-[#9f3029]"], [class~="text-[#a84037]"],
+    [class~="text-[#b8493f]"], [class~="text-[#d45145]"], [class~="text-[#ef6351]"], .text-red-600):not(:where(.recap-page *)) { color: #ffa69a; }
+  .app-viewport :is([class~="border-[#f0ded7]"], [class~="border-[#f2e6e1]"], [class~="border-[#f7e8e2]"],
+    [class~="border-[#efc9c1]"], .border-slate-100, .border-slate-200, .border-slate-200\/60):not(:where(.recap-page *)) { border-color: var(--night-line); }
+  .app-viewport :is([class~="bg-[#fff0eb]"], [class~="bg-[#fff4ef]"]):not(:where(.recap-page *)) { background-color: #271b19; }
+  .app-viewport :is([class~="bg-[#e1ece8]"], .bg-emerald-50):not(:where(.recap-page *)) { background-color: var(--night-accent-fill); }
+  .app-viewport .text-emerald-700 { color: var(--night-accent); }
+  .app-viewport :is(.bg-amber-50, .bg-amber-50\/70, .bg-amber-100) { background-color: #433b25; }
+  .app-viewport .text-amber-800 { color: #f2d58c; }
+  .app-viewport .bg-rose-50 { background-color: #432b35; }
+  .app-viewport .text-rose-700 { color: #f2a8be; }
+  .app-viewport :is(.border-amber-100, .border-amber-200) { border-color: #76643a; }
+  .app-viewport :is(.border-emerald-100, .border-emerald-200, .border-emerald-600) { border-color: var(--night-accent-line); }
+  .app-viewport :is(.bg-slate-950, .bg-slate-800, .bg-slate-700, .bg-emerald-600):not(:where(.recap-page *)) { background-color: #333f4c; color: #f1f5fa; }
+  .app-viewport :is(button, input, select, textarea):disabled:not(:where(.recap-page *)) { background-color: #1c1c1c; color: #919191; }
+  .app-viewport :is(input, select, textarea):not(:where(.recap-page *)) { background-color: #0c0c0c; color: #efefef; border-color: #363636; }
+  .app-viewport :is(input, textarea)::placeholder { color: #a5a5ae; }
+  .app-viewport :is(button, a):focus-visible { outline-color: var(--night-accent); }
+
+  .liquid-workspace {
+    --glass-edge: rgba(255, 255, 255, .13);
+    --glass-line: rgba(255, 255, 255, .1);
+    --glass-fill: rgba(18, 18, 18, .88);
+    --glass-shadow: none;
+  }
+  .liquid-workspace .workspace-shell { background: #000; }
+  .liquid-workspace .workspace-header { background: rgba(0, 0, 0, .82); box-shadow: none; }
+  .appearance-toggle { background: #101010; border-color: #303030; }
+  .liquid-workspace .workspace-header .appearance-option { color: #aaa; }
+  .liquid-workspace .workspace-header .appearance-option[aria-pressed="true"] { background: var(--night-accent-fill); color: var(--night-accent); box-shadow: none; }
+  /* Utility background classes must not turn unframed sections into separate blocks. */
+  .liquid-workspace .workspace-panel,
+  .liquid-workspace .workspace-header > p,
+  .liquid-workspace .function-group > :is(div, article),
+  .liquid-workspace .mypage-leaderboard { background: transparent; box-shadow: none; }
+  .liquid-workspace .workspace-header :is(h2, button),
+  .liquid-workspace .workspace-brand p { color: #f0f0f4; }
+  .liquid-workspace .workspace-header > div > div > p,
+  .liquid-workspace .workspace-header > p,
+  .liquid-workspace .workspace-brand span { color: #b8b8c2; }
+  .liquid-workspace .workspace-panel > h3 { color: #e8e8ed; }
+  .liquid-workspace .workspace-navigation { background: var(--glass-fill); box-shadow: var(--glass-shadow); }
+  .liquid-workspace .workspace-nav-lens { background: var(--night-accent-fill); border-color: transparent; box-shadow: none; }
+  .liquid-workspace .workspace-nav-item { color: #bcbcc4; }
+  .liquid-workspace .workspace-nav-item[aria-current="page"] { color: var(--night-accent); }
+  .liquid-workspace :is(.function-group, .mypage-layout > .workspace-panel,
+    .admin-layout > .workspace-panel:not(.admin-summary), .mypage-schedule, .calendar-panel, .mypage-push, .admin-schedule) {
+    background: #101010; border-color: #292929; box-shadow: none;
+  }
+  .liquid-workspace .function-group > .reservation-detail-card:has(.bg-\[\#ff665a\]) { background: #1a1413; }
+  .liquid-workspace :is(.reservation-detail-card, .booking-slot-row) { border-color: #303030; box-shadow: none; }
+  .liquid-workspace .booking-slot-row:has([aria-pressed="true"]) { background: #241a18; border-color: #f28b7b; }
+  .liquid-workspace :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea):not(:where(.recap-page *)) {
+    background-color: #0c0c0c; border-color: #363636; box-shadow: none;
+  }
+  .liquid-workspace .mypage-membership-list > div { background: transparent; }
+  .loading-screen { background: #000; color: #ededed; }
+  .loading-status { color: #b8b8c4; }
+  .loading-brand-glass, .workspace-refresh-status { background: #151515; border-color: #333; box-shadow: inset 0 1px 0 #ffffff0a; }
+  .liquid-workspace .workspace-nav-item[aria-current="page"] { background: transparent; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme="dark"] :is(.liquid-workspace .workspace-header, .liquid-workspace .workspace-navigation,
+  .loading-brand-glass, .workspace-refresh-status) { background: #101010; }
+}

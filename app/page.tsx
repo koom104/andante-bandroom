@@ -1,17 +1,24 @@
 "use client";
 
 import type { Session as SupabaseSession } from "@supabase/supabase-js";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Check, ChevronLeft, ChevronRight, LockKeyhole, LogOut, Plus, Trash2 } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { supabase } from "./supabase";
+import { WorkspaceShell, workspaceTitles } from "./workspace-shell";
 import { buildDateScheduleRows, updateDateScheduleDraft, type DateScheduleDrafts } from "./date-schedule-drafts";
+import { isAccountChange, restoredTab } from "./session-navigation";
+import { syncPushSubscription } from "./push-client";
+import { LoadingScreen, LoadingStatus } from "./loading-state";
+import { AppearanceSelector } from "./appearance";
+import { sessionDisplayOrder, sortTeamMembersBySession } from "./team-member-order";
+import { sortGoalCategories } from "./goal-order";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
-type Tab = "booking" | "suggestions" | "calendar" | "my" | "team" | "admin";
+const RecapTab = lazy(() => import("./recap-tab"));
+type Tab = "booking" | "suggestions" | "calendar" | "my" | "team" | "admin" | "recap";
 type Role = "member" | "manager" | "admin";
 type ProfileStatus = "pending" | "approved" | "rejected" | "suspended";
 type SessionRole = "보컬" | "리드기타" | "리듬기타" | "어쿠스틱" | "베이스" | "드럼" | "피아노" | "신디";
-type ScheduleEditMode = "busy" | "free";
-
 type ScheduleSlotSelection = {
   day: Day;
   time: string;
@@ -97,6 +104,9 @@ type Reservation = {
   location: BookingLocation;
   bookingType: BookingType;
   attendanceUserIds?: string[];
+  sourceType?: "booking" | "notion_history";
+  creditedMinutes?: number;
+  isOwnTeam?: boolean;
 };
 
 type BookingSlot = {
@@ -157,7 +167,7 @@ type TeamRehearsalTotal = {
 
 const days: Day[] = ["월", "화", "수", "목", "금", "토", "일"];
 const dateDayNames: Day[] = ["일", "월", "화", "수", "목", "금", "토"];
-const sessionOptions: SessionRole[] = ["보컬", "리드기타", "리듬기타", "어쿠스틱", "베이스", "드럼", "피아노", "신디"];
+const sessionOptions: SessionRole[] = [...sessionDisplayOrder];
 const privacyConsentVersion = "2026-07-31-v1";
 
 function normalizeSessionRole(session: string): SessionRole {
@@ -227,19 +237,6 @@ function normalizeCohort(value: string) {
   }
 
   return trimmed;
-}
-
-function base64UrlToBytes(value: string) {
-  const padding = "=".repeat((4 - (value.length % 4)) % 4);
-  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return bytes;
 }
 
 async function fetchAllRows<T>(tableName: string, pageSize = 1000): Promise<{ data: T[] | null; error: unknown | null }> {
@@ -859,6 +856,8 @@ export default function Home() {
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
   const rehearsalStatsCacheRef = useRef({ profileId: "", loadedAt: 0 });
+  const loadedProfileUserRef = useRef("");
+  const [pushHealth, setPushHealth] = useState("");
 
   useEffect(() => {
     if (activeTab === "suggestions") {
@@ -876,7 +875,7 @@ export default function Home() {
   }, [activeTab]);
 
   const loadProfile = useCallback(async (authSession: SupabaseSession) => {
-    setIsBooting(true);
+    if (loadedProfileUserRef.current !== authSession.user.id) setIsBooting(true);
     setDbError(null);
 
     const user = authSession.user;
@@ -898,6 +897,7 @@ export default function Home() {
     }
 
     if (data) {
+      loadedProfileUserRef.current = user.id;
       setProfile(data as Profile);
       setStatus((data as Profile).status === "approved" ? "승인된 계정으로 접속했어요." : "관리자 승인을 기다리고 있어요.");
       setIsBooting(false);
@@ -923,6 +923,7 @@ export default function Home() {
       return;
     }
 
+    loadedProfileUserRef.current = user.id;
     setProfile(inserted as Profile);
     setStatus("가입 신청이 접수됐어요. 관리자 승인을 기다려 주세요.");
     setIsBooting(false);
@@ -985,7 +986,7 @@ export default function Home() {
         student_no: item.student_no ?? "",
       }),
     ) as Profile[];
-    const nextGoalCategories = goalCategoryError ? [] : ((goalCategoryResult.data ?? []) as GoalCategory[]);
+    const nextGoalCategories = goalCategoryError ? [] : sortGoalCategories((goalCategoryResult.data ?? []) as GoalCategory[]);
     const profileMap = new Map(nextProfiles.map((item) => [item.id, item]));
     const clubRoomStatusError = clubRoomStatusResult.error ? getErrorMessage(clubRoomStatusResult.error) : "";
     if (clubRoomStatusError && !isMissingSchemaError(clubRoomStatusError)) {
@@ -1097,7 +1098,7 @@ export default function Home() {
         color: palette.color,
         accent: palette.accent,
         leaderId: leaderRow?.user_id ?? members[0]?.id ?? "",
-        members,
+        members: sortTeamMembersBySession(members),
         busy: Object.fromEntries(members.map((member) => [member.id, scheduleMap[member.id] ?? []])),
       };
     });
@@ -1133,7 +1134,7 @@ export default function Home() {
       attendanceByBooking.set(row.booking_id, [...(attendanceByBooking.get(row.booking_id) ?? []), row.user_id]);
     }
 
-    const nextReservations = bookingRows.map((booking) => {
+    const nextReservations = bookingRows.map<Reservation>((booking) => {
       const team = booking.team_id ? teamById.get(booking.team_id) : undefined;
       const leader = team?.members.find((member) => member.id === team.leaderId);
       const bookingType = booking.booking_type === "room_block" ? "room_block" : "rehearsal";
@@ -1285,6 +1286,20 @@ export default function Home() {
   useEffect(() => {
     let mounted = true;
     let recoveryPromise: Promise<void> | null = null;
+    let currentUserId: string | null = null;
+
+    const applySession = (nextSession: SupabaseSession | null) => {
+      if (!mounted) return;
+      const nextUserId = nextSession?.user.id ?? null;
+      if (isAccountChange(currentUserId, nextUserId)) {
+        setIsBooting(true);
+        let nextTab: Tab = "booking";
+        try { nextTab = restoredTab(localStorage.getItem(`andante:tab:${nextUserId}`)); } catch { /* Storage may be unavailable in private mode. */ }
+        setActiveTab(nextTab);
+      }
+      currentUserId = nextUserId;
+      setSession((current) => current?.access_token === nextSession?.access_token && current?.user.id === nextUserId ? current : nextSession);
+    };
 
     const recoverSession = () => {
       if (recoveryPromise) {
@@ -1292,7 +1307,8 @@ export default function Home() {
       }
 
       recoveryPromise = (async () => {
-        const { data } = await supabase.auth.getSession();
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) return;
         let nextSession = data.session;
 
         if (nextSession?.expires_at && nextSession.expires_at * 1000 <= Date.now() + 5 * 60 * 1000) {
@@ -1306,11 +1322,14 @@ export default function Home() {
           return;
         }
 
-        setSession(nextSession);
+        applySession(nextSession);
         if (!nextSession) {
           setIsBooting(false);
         }
-      })().finally(() => {
+      })().catch(() => {
+        // Network failure while resuming is not a sign-out.
+        if (mounted) setIsBooting(false);
+      }).finally(() => {
         recoveryPromise = null;
       });
 
@@ -1328,12 +1347,10 @@ export default function Home() {
     window.addEventListener("pageshow", recoverVisibleSession);
     document.addEventListener("visibilitychange", recoverVisibleSession);
 
-    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      setSession(nextSession);
-      if (event === "SIGNED_IN") {
-        setActiveTab("booking");
-      }
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      applySession(nextSession);
       if (!nextSession) {
+        loadedProfileUserRef.current = "";
         setProfile(null);
         setTeams([]);
         setAllTeams([]);
@@ -1350,6 +1367,7 @@ export default function Home() {
         rehearsalStatsCacheRef.current = { profileId: "", loadedAt: 0 };
         setPushSubscriptionStatuses([]);
         setReservations([]);
+        setPushHealth("");
         setIsBooting(false);
       }
     });
@@ -1364,7 +1382,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (session) {
+    if (session && loadedProfileUserRef.current !== session.user.id) {
       const timeout = window.setTimeout(() => {
         void loadProfile(session);
       }, 0);
@@ -1372,6 +1390,36 @@ export default function Home() {
       return () => window.clearTimeout(timeout);
     }
   }, [session, loadProfile]);
+
+  useEffect(() => {
+    if (!session || isBooting) return;
+    try { localStorage.setItem(`andante:tab:${session.user.id}`, activeTab); } catch { /* Keep navigation usable without storage. */ }
+  }, [session, activeTab, isBooting]);
+
+  useEffect(() => {
+    if (!profile || profile.status !== "approved" || profile.password_reset_required) return;
+    let active = true;
+    let pending = false;
+    let checkedAt = 0;
+    const checkPush = async () => {
+      if (document.visibilityState !== "visible" || pending || Date.now() - checkedAt < 5 * 60_000) return;
+      pending = true;
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!active || data.session?.user.id !== profile.id) return;
+        const result = await syncPushSubscription(profile.id, data.session.access_token);
+        if (active) setPushHealth(result.message);
+        checkedAt = Date.now();
+      } catch {
+        // A temporary offline resume must not erase a working subscription.
+        if (active) setPushHealth("알림 등록 상태를 확인하지 못했습니다. 인터넷 연결 후 다시 확인해 주세요.");
+      } finally { pending = false; }
+    };
+    void checkPush();
+    document.addEventListener("visibilitychange", checkPush);
+    window.addEventListener("online", checkPush);
+    return () => { active = false; document.removeEventListener("visibilitychange", checkPush); window.removeEventListener("online", checkPush); };
+  }, [profile?.id, profile?.status, profile?.password_reset_required]);
 
   useEffect(() => {
     if (profile?.status === "approved") {
@@ -1390,7 +1438,13 @@ export default function Home() {
   }, [activeTab, profile?.status, refreshRehearsalStats]);
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
-  const visibleTabs = canUseAdminTab(profile) ? [...baseTabs, adminTab] : baseTabs;
+  const visibleTabs = [...baseTabs, ...(canUseAdminTab(profile) ? [adminTab] : []), { id: "recap" as const, label: "리캡", short: "♪" }];
+  useEffect(() => {
+    if (profile && activeTab === "admin" && !canUseAdminTab(profile)) {
+      const timeout = window.setTimeout(() => setActiveTab("booking"), 0);
+      return () => window.clearTimeout(timeout);
+    }
+  }, [activeTab, profile]);
   const approvedProfiles = profiles.filter((item) => item.status === "approved");
   const pendingProfiles = profiles.filter((item) => item.status === "pending");
   const leaderTeams = useMemo(() => teams.filter((team) => team.leaderId === profile?.id), [teams, profile?.id]);
@@ -1513,16 +1567,19 @@ export default function Home() {
 
   async function completePasswordReset(nextPassword: string) {
     setStatus("");
-    const { error } = await supabase.auth.updateUser({ password: nextPassword });
-
-    if (error) {
-      setStatus(getErrorMessage(error));
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) {
+      setStatus("다시 로그인해 주세요.");
       return;
     }
-
-    const { error: profileError } = await supabase.rpc("complete_password_reset");
-    if (profileError) {
-      setStatus(getErrorMessage(profileError));
+    const response = await fetch("/api/auth/complete-password-reset", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${data.session.access_token}` },
+      body: JSON.stringify({ password: nextPassword }),
+    }).catch(() => null);
+    const result = await response?.json().catch(() => null);
+    if (!response?.ok || result?.ok !== true) {
+      setStatus(result?.error ?? "비밀번호 변경에 실패했습니다. 다시 시도해 주세요.");
       return;
     }
 
@@ -2156,7 +2213,7 @@ export default function Home() {
   }
 
   async function addGoalCategory(name: string) {
-    if (!canUseAdminTab(profile)) {
+    if (!profile || !canUseAdminTab(profile)) {
       return;
     }
 
@@ -2244,7 +2301,7 @@ export default function Home() {
 
   async function cancelBooking(bookingId: string, reason: string) {
     if (!profile) {
-      return;
+      return false;
     }
 
     const { error } = await supabase.rpc("cancel_booking", {
@@ -2255,20 +2312,17 @@ export default function Home() {
     if (error) {
       const message = getErrorMessage(error);
       setStatus(message);
-      return;
+      return false;
     }
 
     setStatus("예약을 취소했어요.");
     await sendBookingPushEvent([bookingId], "booking_cancelled");
     await refreshData();
+    return true;
   }
 
   if (isBooting) {
-    return (
-      <PhoneShell>
-        <CenteredMessage title="Andante" body="계정 상태를 확인하고 있어요." />
-      </PhoneShell>
-    );
+    return <LoadingScreen label="계정 상태를 확인하고 있어요." />;
   }
 
   if (!session) {
@@ -2288,11 +2342,7 @@ export default function Home() {
   }
 
   if (!profile) {
-    return (
-      <PhoneShell>
-        <CenteredMessage title="프로필 확인 중" body="프로필을 불러오고 있어요." />
-      </PhoneShell>
-    );
+    return <LoadingScreen label="프로필을 불러오고 있어요." />;
   }
 
   if (profile.privacy_consent_at === null) {
@@ -2320,16 +2370,22 @@ export default function Home() {
   }
 
   return (
-    <main className="app-viewport bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
-      <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
-        <section className="typography-balanced relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
-              <AppHeader selectedTeam={selectedTeam} status={status} profile={profile} onSignOut={signOut} />
-
-              <div className={`app-scroll flex-1 overflow-y-auto px-4 pt-3 ${isTextInputFocused ? "app-scroll-keyboard" : ""}`}>
+    <WorkspaceShell
+      activeTab={activeTab}
+      tabs={visibleTabs}
+      hideNavigation={isTextInputFocused}
+      onChangeTab={(tab) => {
+        if (tab === "suggestions" && activeTab !== "suggestions") {
+          setSelectedTeamId("");
+          setSelectedBookingGoal("");
+          setSelectedBookingLocation("");
+        }
+        setActiveTab(tab);
+      }}
+      header={<AppHeader selectedTeam={selectedTeam} status={status} profile={profile} onSignOut={signOut} desktopTitle={workspaceTitles[activeTab]} />}
+    >
                 {isLoadingData && (
-                  <p className="mb-3 rounded-lg border border-[#f0ded7] bg-white px-3 py-2 text-xs text-slate-500">
-                    데이터를 새로 불러오는 중입니다.
-                  </p>
+                  <LoadingStatus className="workspace-refresh-status" label="데이터를 불러오고 있어요." />
                 )}
 
                 {activeTab === "booking" && (
@@ -2369,7 +2425,7 @@ export default function Home() {
                 {activeTab === "my" && (
                   <MyPageTab
                     profile={profile}
-                    accessToken={session.access_token}
+                    pushHealth={pushHealth}
                     teams={teams}
                     allTeams={allTeams}
                     goalCategories={goalCategories}
@@ -2388,8 +2444,14 @@ export default function Home() {
                   />
                 )}
 
+                {activeTab === "recap" && (
+                  <Suspense fallback={<LoadingStatus className="workspace-refresh-status" label="리캡을 불러오고 있어요." />}>
+                    <RecapTab key={profile.id} userId={profile.id} name={profile.name} />
+                  </Suspense>
+                )}
+
                 {activeTab === "calendar" && (
-                  <CalendarTab reservations={upcomingReservations} ownTeamIds={ownTeamIds} />
+                  <CalendarTab key={profile.id} reservations={upcomingReservations} ownTeamIds={ownTeamIds} allTeams={allTeams} />
                 )}
 
                 {activeTab === "team" && (
@@ -2438,39 +2500,7 @@ export default function Home() {
                     @41기 구강민 만듦
                   </p>
                 )}
-              </div>
-
-              <div
-                className={`app-tabbar absolute inset-x-0 bottom-0 border-t border-[#f0ded7] bg-[#fff8f4]/95 px-4 pt-3 backdrop-blur ${
-                  isTextInputFocused ? "hidden" : ""
-                }`}
-              >
-                <nav className="grid gap-1" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }} aria-label="앱 탭">
-                  {visibleTabs.map((tab) => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => {
-                        if (tab.id === "suggestions" && activeTab !== "suggestions") {
-                          setSelectedTeamId("");
-                          setSelectedBookingGoal("");
-                          setSelectedBookingLocation("");
-                        }
-                        setActiveTab(tab.id);
-                      }}
-                      className={`flex h-12 flex-col items-center justify-center rounded-lg text-xs font-semibold transition ${
-                        activeTab === tab.id ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-[#f7e8e1]"
-                      }`}
-                    >
-                      <span className="text-[11px]">{tab.short}</span>
-                      <span>{tab.label}</span>
-                    </button>
-                  ))}
-                </nav>
-              </div>
-        </section>
-      </div>
-    </main>
+    </WorkspaceShell>
   );
 }
 
@@ -2483,18 +2513,6 @@ function PhoneShell({ children }: { children: ReactNode }) {
         </section>
       </div>
     </main>
-  );
-}
-
-function CenteredMessage({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="flex min-h-full items-center justify-center">
-      <div className="w-full rounded-lg border border-[#f0ded7] bg-white p-5 text-center">
-        <p className="text-xs font-semibold text-[#ef6351]">Andante</p>
-        <h1 className="mt-2 text-2xl font-semibold">{title}</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">{body}</p>
-      </div>
-    </div>
   );
 }
 
@@ -2857,29 +2875,37 @@ function AppHeader({
   status,
   profile,
   onSignOut,
+  desktopTitle,
 }: {
   selectedTeam: Team | null;
   status: string;
   profile: Profile;
   onSignOut: () => void;
+  desktopTitle?: string;
 }) {
   return (
-    <header className="shrink-0 px-4 pb-2 pt-1">
+    <header className="workspace-header shrink-0 px-4 pb-2 pt-1">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold text-[#ef6351]">Andante</p>
-          <h2 className="mt-1 text-2xl font-semibold tracking-tight">합주 예약</h2>
+          <h2 className="mt-1 text-2xl font-semibold">
+            <span className="workspace-mobile-label">{desktopTitle ?? "홈"}</span>
+            <span className="workspace-desktop-label">{desktopTitle ?? "합주 예약"}</span>
+          </h2>
         </div>
+        <div className="workspace-header-actions">
+        <AppearanceSelector />
         <button
           type="button"
           onClick={onSignOut}
-          className={`flex h-[52px] max-w-[120px] flex-col items-center justify-center rounded-lg px-3 ${selectedTeam?.color ?? "bg-slate-800"} text-white`}
+          className={`workspace-signout flex h-[52px] max-w-[120px] flex-col items-center justify-center rounded-lg px-3 ${selectedTeam?.color ?? "bg-slate-800"} text-white`}
           aria-label="로그아웃"
           title={`${profile.name} 로그아웃`}
         >
           <span className="max-w-full truncate text-xs font-bold leading-4">{profile.name}</span>
-          <span className="mt-0.5 text-[10px] font-semibold leading-3 text-white/75">로그아웃</span>
+          <LogOut size={16} aria-hidden="true" />
         </button>
+        </div>
       </div>
       <p className="mt-3 rounded-lg border border-[#f0ded7] bg-white px-3 py-2 text-xs leading-5 text-slate-600">
         {status}
@@ -2952,17 +2978,25 @@ function ThreeWeekCalendar({
   selectedDate,
   onSelectDate,
   hasMarker,
+  markerTone,
   compact = false,
+  anchorDate,
+  dateLabel,
+  disabled = false,
 }: {
   selectedDate: string;
   onSelectDate: (date: string) => void;
   hasMarker?: (date: string) => boolean;
+  markerTone?: (date: string) => "own" | "other";
   compact?: boolean;
+  anchorDate?: string;
+  dateLabel?: (date: string) => string;
+  disabled?: boolean;
 }) {
-  const cells = threeWeekCalendarCells();
+  const cells = threeWeekCalendarCells(anchorDate);
 
   return (
-    <div className={compact ? "mt-0" : "mt-3"}>
+    <div className={`three-week-calendar ${compact ? "mt-0" : "mt-3"}`}>
       <div className="mb-1 grid grid-cols-7 text-center text-[11px] font-semibold text-slate-500">
         {dateDayNames.map((day, index) => (
           <span
@@ -2975,7 +3009,7 @@ function ThreeWeekCalendar({
       </div>
       <div className={`grid grid-cols-7 ${compact ? "gap-y-0.5" : "gap-y-1"}`}>
         {cells.map((date, index) => {
-          const cellClassName = `flex ${compact ? "h-[38px]" : "h-10"} items-center justify-center ${index % 7 === 0 ? "" : "border-l border-slate-200/60"}`;
+          const cellClassName = `three-week-calendar-cell flex min-w-0 ${compact ? "h-[38px]" : "h-10"} items-center justify-center ${index % 7 === 0 ? "" : "border-l border-slate-200/60"}`;
 
           if (!date) {
             return <div key={`empty-${index}`} className={cellClassName} aria-hidden="true" />;
@@ -2989,14 +3023,16 @@ function ThreeWeekCalendar({
               <button
                 type="button"
                 onClick={() => onSelectDate(date)}
-                className={`${compact ? "h-[38px] w-[38px]" : "h-10 w-10"} rounded-md px-1 py-1 text-center transition ${
-                  isSelected ? "border-2 border-[#efb7ae] bg-transparent text-slate-950" : "border border-transparent bg-transparent text-slate-700"
+                disabled={disabled}
+                className={`three-week-calendar-day ${compact ? "h-[38px]" : "h-10"} w-full max-w-10 min-w-0 rounded-md border border-transparent py-1 text-center transition ${
+                  isSelected ? "bg-[#e1ece8] text-slate-950" : "bg-transparent text-slate-700"
                 }`}
                 aria-pressed={isSelected}
+                aria-label={dateLabel?.(date) ?? formatDateLabel(date)}
               >
-                <span className="block text-xs font-semibold leading-4">{formatDateShort(date)}</span>
+                <span className="block whitespace-nowrap text-xs font-semibold leading-4">{formatDateShort(date)}</span>
                 {isMarked && (
-                  <span className="mx-auto mt-0.5 block h-1.5 w-1.5 rounded-full bg-[#ff665a]" />
+                  <span className={`mx-auto mt-0.5 block h-1.5 w-1.5 rounded-full ${markerTone ? markerTone(date) === "own" ? "calendar-own-dot" : "calendar-other-dot" : "bg-[#ff665a]"}`} />
                 )}
               </button>
             </div>
@@ -3028,7 +3064,7 @@ function BookingTab({
   leaderReservations: Reservation[];
   hasLeaderTeam: boolean;
   onUpdateClubRoomStatus: (isOpen: boolean) => Promise<void>;
-  onCancelBooking: (bookingId: string, reason: string) => Promise<void>;
+  onCancelBooking: (bookingId: string, reason: string) => Promise<boolean>;
 }) {
   const [pendingCancelBookingId, setPendingCancelBookingId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
@@ -3037,24 +3073,26 @@ function BookingTab({
     setCancellingBookingId(bookingId);
 
     try {
-      await onCancelBooking(bookingId, "팀장 취소");
-      setPendingCancelBookingId(null);
+      const cancelled = await onCancelBooking(bookingId, "팀장 취소");
+      if (cancelled) setPendingCancelBookingId(null);
     } finally {
       setCancellingBookingId(null);
     }
   }
 
   return (
-    <div className="space-y-3">
+    <div className="home-layout space-y-3">
+      <div className="home-room">
       <ClubRoomStatusPanel
         status={clubRoomStatus}
         isReady={isClubRoomStatusReady}
         onUpdateStatus={onUpdateClubRoomStatus}
       />
+      </div>
 
       {selectedTeam && (
-        <MobilePanel title="합주 일정" className="readable-compact">
-          <div className={`space-y-1 ${ownTeamReservations.length >= 4 ? "max-h-64 overflow-y-auto pr-1" : ""}`}>
+        <MobilePanel title="합주 일정" className="home-agenda readable-compact">
+          <div className={`function-group space-y-1 ${ownTeamReservations.length >= 4 ? "function-group-scroll max-h-64 pr-1" : ""}`}>
             {ownTeamReservations.map((reservation) => {
               const date = reservationDisplayDate(reservation);
 
@@ -3086,11 +3124,11 @@ function BookingTab({
         </MobilePanel>
       )}
 
-      <ReservationDetailPanel title={`금일 예약 · ${formatDateLabel(todayISO())}`} date={todayISO()} reservations={reservations} ownTeamIds={ownTeamIds} />
+      <ReservationDetailPanel className="home-today" title={`금일 예약 · ${formatDateLabel(todayISO())}`} date={todayISO()} reservations={reservations} ownTeamIds={ownTeamIds} />
 
       {hasLeaderTeam && (
-        <MobilePanel title="팀장 예약 관리">
-          <div className="space-y-2">
+        <MobilePanel title="팀장 예약 관리" className="home-management">
+          <div className="function-group space-y-2">
             {leaderReservations.map((reservation) => (
               <div key={reservation.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -3148,136 +3186,105 @@ function BookingTab({
   );
 }
 
-function CalendarTab({
-  reservations,
-  ownTeamIds,
-}: {
+function CalendarTab({ reservations, ownTeamIds, allTeams }: {
   reservations: Reservation[];
   ownTeamIds: ReadonlySet<string>;
+  allTeams: Team[];
 }) {
   const today = todayISO();
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const cells = useMemo(() => threeWeekCalendarCells(today), [today]);
-  const reservationsByDate = useMemo(() => {
-    const grouped = new Map<string, Reservation[]>();
-
-    for (const reservation of reservations) {
-      if (reservation.status !== "confirmed") {
-        continue;
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [anchorDate, setAnchorDate] = useState(today);
+  const [periodRows, setPeriodRows] = useState<Reservation[]>(reservations);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setError(""); setPeriodRows([]);
+    async function loadPeriod() {
+      const end = addDays(anchorDate, 20);
+      const response = await supabase.rpc("get_rehearsal_calendar", { p_start: anchorDate, p_end: end });
+      let rows: Array<Record<string, unknown>>;
+      if (response.error && ["PGRST202", "42883"].includes(response.error.code)) {
+        // Ordinary past bookings remain available before the history migration is applied.
+        const fallback = await supabase.from("bookings")
+          .select("id,team_id,booking_date,day_of_week,start_time,duration,purpose,status,booking_location,booking_type")
+          .eq("status", "confirmed").gte("booking_date", anchorDate).lte("booking_date", end)
+          .order("booking_date").order("start_time");
+        if (fallback.error) throw fallback.error;
+        rows = (fallback.data ?? []) as Array<Record<string, unknown>>;
+      } else {
+        if (response.error) throw response.error;
+        rows = (response.data ?? []) as Array<Record<string, unknown>>;
       }
-
-      const date = reservationDisplayDate(reservation);
-      grouped.set(
-        date,
-        [...(grouped.get(date) ?? []), reservation].sort((left, right) => timeToMinutes(left.start) - timeToMinutes(right.start)),
-      );
+      const mapped: Reservation[] = rows.map((row) => {
+        const teamId = String(row.team_id ?? "");
+        const team = allTeams.find((entry) => entry.id === teamId);
+        const bookingType = row.booking_type === "room_block" ? "room_block" : "rehearsal";
+        return {
+          id: String(row.booking_id ?? row.id), teamId,
+          teamName: bookingType === "room_block" ? "사용 제한" : String(row.team_name ?? team?.name ?? "삭제된 팀"),
+          teamSong: String(row.goal ?? team?.song ?? ""), leaderName: "", memberCount: team?.members.length ?? 0,
+          bookingDate: String(row.booking_date), day: dateToDay(String(row.booking_date)),
+          start: String(row.start_time), duration: Number(row.duration), purpose: String(row.purpose ?? row.goal ?? ""),
+          status: "confirmed", location: row.booking_location === "external" ? "external" : "club_room", bookingType,
+          sourceType: row.source_type === "notion_history" ? "notion_history" : "booking",
+          creditedMinutes: row.credited_minutes == null ? undefined : Number(row.credited_minutes),
+          isOwnTeam: row.is_own_team === true,
+        };
+      });
+      if (active) setPeriodRows(mapped);
     }
-
+    void loadPeriod().catch((err) => { if (active) setError(getErrorMessage(err)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [anchorDate, allTeams, reservations]);
+  const byDate = useMemo(() => {
+    const grouped = new Map<string, Reservation[]>();
+    for (const entry of periodRows) {
+      const date = reservationDisplayDate(entry);
+      grouped.set(date, [...(grouped.get(date) ?? []), entry]);
+    }
+    for (const rows of grouped.values()) rows.sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start) || a.teamName.localeCompare(b.teamName, "ko"));
     return grouped;
-  }, [reservations]);
-  const isCompact = selectedDate !== null;
-
-  return (
-    <div className="space-y-3">
-      <MobilePanel title="캘린더" className="readable-compact">
-        {isCompact && (
-          <button
-            type="button"
-            onClick={() => setSelectedDate(null)}
-            className="w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-1.5 text-xs font-semibold text-[#b8493f]"
-          >
-            전체 보기
-          </button>
-        )}
-
-        <div className="mt-2 grid grid-cols-7 border-b border-[#f2e6e1] pb-1 text-center text-[11px] font-semibold text-slate-500">
-          {dateDayNames.map((day, index) => (
-            <span key={day} className={index === 0 ? "text-[#d45145]" : ""}>{day}</span>
-          ))}
+  }, [periodRows]);
+  const own = (row: Reservation) => row.isOwnTeam || ownTeamIds.has(row.teamId);
+  const selected = byDate.get(selectedDate) ?? [];
+  function changePeriod(date: string) { setAnchorDate(date); setSelectedDate(date); }
+  return <MobilePanel title="캘린더" className="calendar-panel calendar-history-panel readable-compact">
+    <div className="calendar-team-legend" aria-label="예약 색상 안내"><span><i className="calendar-own-dot" />내 팀</span><span><i className="calendar-other-dot" />다른 팀</span></div>
+    <div className="admin-cancellation-layout">
+      <div className="admin-cancellation-calendar">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold">{anchorDate.slice(0,4)}.{formatDateShort(anchorDate)} – {formatDateShort(addDays(anchorDate,20))}</p>
+          <div className="flex items-center gap-1">
+            <button type="button" title="이전 기간" aria-label="이전 기간" onClick={() => changePeriod(addDays(anchorDate,-21))}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white"><ChevronLeft size={18} /></button>
+            <button type="button" onClick={() => changePeriod(today)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold">오늘</button>
+            <button type="button" title="다음 기간" aria-label="다음 기간" onClick={() => changePeriod(addDays(anchorDate,21))}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white"><ChevronRight size={18} /></button>
+          </div>
         </div>
-
-        <div className="grid grid-cols-7">
-          {cells.map((date, index) => {
-            const dayReservations = date ? reservationsByDate.get(date) ?? [] : [];
-            const isSelected = date === selectedDate;
-            const isToday = date === today;
-            const isPast = Boolean(date && date < today);
-
-            if (!date) {
-              return (
-                <div
-                  key={`empty-month-${index}`}
-                  className={isCompact ? "h-11" : "h-[124px]"}
-                  aria-hidden="true"
-                />
-              );
-            }
-
-            return (
-              <button
-                key={date}
-                type="button"
-                onClick={() => setSelectedDate(date)}
-                className={`flex min-w-0 flex-col items-stretch justify-start px-0.5 pt-1 text-left transition ${
-                  isCompact ? "h-11" : "h-[124px]"
-                } ${isSelected ? "bg-[#fff4ef]" : "bg-white"}`}
-                aria-pressed={isSelected}
-                aria-label={`${formatDateLabel(date)} ${dayReservations.length}건 예약`}
-              >
-                <span
-                  className={`mx-auto flex h-6 min-w-8 max-w-[42px] items-center justify-center rounded-md px-1 text-[10px] font-semibold ${
-                    isSelected
-                      ? "text-slate-950"
-                      : isToday
-                        ? "bg-slate-950 text-white"
-                        : isPast
-                          ? "text-slate-300"
-                          : index % 7 === 0
-                            ? "text-[#d45145]"
-                            : "text-slate-700"
-                  }`}
-                >
-                  {formatDateShort(date)}
-                </span>
-
-                {isCompact ? (
-                  dayReservations.length > 0 && (
-                    <span className="mt-1 flex items-center justify-center gap-0.5" aria-hidden="true">
-                      {dayReservations.slice(0, 5).map((reservation) => (
-                        <span key={reservation.id} className="h-1 w-1 rounded-full bg-[#ef8e7f]" />
-                      ))}
-                      {dayReservations.length > 5 && <span className="text-[8px] leading-none text-[#d45145]">+</span>}
-                    </span>
-                  )
-                ) : (
-                  <span className="mt-1 block space-y-0.5 overflow-hidden">
-                    {dayReservations.slice(0, 4).map((reservation) => (
-                      <span
-                        key={reservation.id}
-                        className="block truncate rounded-sm border border-[#efc9c1] bg-[#fff8f4] px-0.5 py-0.5 text-[9px] font-semibold leading-3 text-[#a84037]"
-                        title={`${reservation.start} ${reservation.teamName}`}
-                      >
-                        {reservation.bookingType === "room_block"
-                          ? "사용 제한"
-                          : reservation.location === "external"
-                            ? `${reservation.teamName} · 외부`
-                            : reservation.teamName}
-                      </span>
-                    ))}
-                    {dayReservations.length > 4 && (
-                      <span className="block text-center text-[9px] font-semibold text-slate-400">+{dayReservations.length - 4}</span>
-                    )}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </MobilePanel>
-
-      {selectedDate && <ReservationDetailPanel date={selectedDate} reservations={reservations} ownTeamIds={ownTeamIds} />}
+        <label className="calendar-history-jump"><span>날짜로 이동</span><input type="date" aria-label="캘린더 조회 시작 날짜" min="2000-01-01" max={addDays(today,365)} value={anchorDate}
+          onChange={(event) => { if (event.target.value) changePeriod(event.target.value); }} /></label>
+        <ThreeWeekCalendar selectedDate={selectedDate} onSelectDate={setSelectedDate} anchorDate={anchorDate} compact
+          hasMarker={(date) => (byDate.get(date)?.length ?? 0) > 0}
+          markerTone={(date) => byDate.get(date)?.some(own) ? "own" : "other"}
+          dateLabel={(date) => `${formatDateLabel(date)} ${byDate.get(date)?.length ?? 0}건 예약${byDate.get(date)?.some(own) ? ", 내 팀 예약 있음" : ""}`} />
+      </div>
+      <div className="admin-cancellation-list calendar-history-list" aria-live="polite" aria-busy={loading}>
+        <div className="mb-3 flex items-center justify-between gap-2"><h4 className="text-sm font-semibold">{formatDateLabel(selectedDate)}</h4><span className="text-xs text-slate-500">{loading ? "조회 중" : `${selected.length}건`}</span></div>
+        {loading ? <LoadingStatus label="합주 예약을 불러오고 있어요." /> : error ? <p role="alert" className="text-sm text-red-700">{error}</p>
+          : selected.length === 0 ? <EmptyText text="선택한 날짜에 합주 예약이 없습니다." />
+          : <div className="calendar-history-records">{selected.map((row) => <article key={row.id} className={`calendar-history-record ${own(row) ? "is-own-team" : "is-other-team"}`}>
+            <div className="calendar-record-heading"><strong>{row.start}–{addHours(row.start,row.duration)}</strong>{own(row) && <span className="calendar-own-badge">내 팀</span>}</div>
+            <p className="calendar-record-title">{row.teamName}</p>
+            <p className="calendar-record-meta">{row.bookingType === "room_block" ? "사용 제한" : row.location === "external" ? "외부 합주실" : "동아리방"}{row.purpose ? ` · ${row.purpose}` : ""}
+              {row.sourceType === "notion_history" ? " · 과거 예약 기준" : ""}</p>
+            {row.creditedMinutes != null && row.creditedMinutes < row.duration*60 && <p className="calendar-record-meta">공동 예약 · 팀별 집계 {formatDuration(row.creditedMinutes/60)}</p>}
+          </article>)}</div>}
+      </div>
     </div>
-  );
+  </MobilePanel>;
 }
 
 function SuggestionsTab({
@@ -3326,7 +3333,8 @@ function SuggestionsTab({
   ];
 
   return (
-    <div className="space-y-3">
+    <div className="reservation-layout space-y-3">
+      <div className="reservation-controls space-y-3">
       <MobilePanel title="합주 목표 선택">
         {leaderTeams.length > 0 ? (
           <label className="block">
@@ -3461,7 +3469,11 @@ function SuggestionsTab({
         )}
       </MobilePanel>
 
-      <div className="space-y-3">
+        </>
+      )}
+      </div>
+      {selectedTeam && selectedLocation ? (
+      <div className="reservation-slots space-y-3">
         {timeBands.map((band) => {
           const bandSlots = slots.filter((slot) => {
             const minutes = timeToMinutes(slot.time);
@@ -3494,7 +3506,10 @@ function SuggestionsTab({
           </MobilePanel>
         )}
       </div>
-        </>
+      ) : (
+        <div className="reservation-placeholder workspace-desktop-only">
+          <EmptyText text="예약할 팀과 장소를 선택해 주세요." />
+        </div>
       )}
     </div>
   );
@@ -3511,6 +3526,16 @@ function BookingSlotRow({
   isSelected: boolean;
   onToggle: (time: string) => void;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const scrollAnchorRef = useRef<{ top: number; scroller: HTMLElement } | null>(null);
+  useLayoutEffect(() => {
+    const anchor = scrollAnchorRef.current;
+    scrollAnchorRef.current = null;
+    if (anchor && rowRef.current) {
+      // The selection summary above the slots can grow or shrink after each click.
+      anchor.scroller.scrollTop += rowRef.current.getBoundingClientRect().top - anchor.top;
+    }
+  }, [isSelected]);
   const disabled = slot.status === "reserved";
   const statusLabel =
     slot.status === "reserved" ? "예약 완료" : slot.status === "available" ? "전원 가능" : slot.status === "limited" ? "일부 가능" : "불가";
@@ -3524,8 +3549,8 @@ function BookingSlotRow({
           : "bg-rose-50 text-rose-700";
 
   return (
-    <div className={`rounded-lg border px-3 py-2 ${isSelected ? "border-[#ff665a] bg-[#fff8f4]" : "border-[#f0ded7] bg-white"}`}>
-      <div className="flex items-start justify-between gap-2">
+    <div ref={rowRef} className={`booking-slot-row rounded-lg border px-3 py-2 ${isSelected ? "border-[#ff665a] bg-[#fff8f4]" : "border-[#f0ded7] bg-white"}`}>
+      <div className="booking-slot-summary flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold">
             {slot.time}-{slot.end}
@@ -3540,7 +3565,7 @@ function BookingSlotRow({
       </div>
 
       {slot.absent.length > 0 && slot.status !== "reserved" && (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <div className="booking-slot-absent mt-1.5 flex flex-wrap gap-1.5">
           {slot.absent.map((member) => (
             <span key={member.id} className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
               {member.name} {slot.absentReasons[member.id] ?? "불가"}
@@ -3552,8 +3577,16 @@ function BookingSlotRow({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => onToggle(slot.time)}
-        className={`mt-2 h-9 w-full rounded-lg text-sm font-semibold ${
+        onClick={() => {
+          const row = rowRef.current;
+          const scroller = row?.closest<HTMLElement>(".workspace-content");
+          if (row && scroller) scrollAnchorRef.current = { top: row.getBoundingClientRect().top, scroller };
+          onToggle(slot.time);
+        }}
+        aria-label={`${slot.time}-${slot.end} ${disabled ? "이미 예약됨" : isSelected ? "선택 해제" : "선택"}`}
+        aria-pressed={isSelected}
+        title={disabled ? "이미 예약됨" : isSelected ? "선택 해제" : "선택"}
+        className={`booking-slot-toggle mt-2 h-9 w-full rounded-lg text-sm font-semibold ${
           disabled
             ? "bg-slate-100 text-slate-400"
             : isSelected
@@ -3561,7 +3594,10 @@ function BookingSlotRow({
               : "bg-[#ff665a] text-white"
         }`}
       >
-        {slot.status === "reserved" ? "이미 예약됨" : isSelected ? "선택 해제" : "선택"}
+        <span className="workspace-mobile-label">{slot.status === "reserved" ? "이미 예약됨" : isSelected ? "선택 해제" : "선택"}</span>
+        {disabled ? <LockKeyhole className="workspace-nav-icon" size={18} aria-hidden="true" />
+          : isSelected ? <Check className="workspace-nav-icon" size={18} aria-hidden="true" />
+          : <Plus className="workspace-nav-icon" size={18} aria-hidden="true" />}
       </button>
     </div>
   );
@@ -3569,7 +3605,7 @@ function BookingSlotRow({
 
 function MyPageTab({
   profile,
-  accessToken,
+  pushHealth,
   teams,
   allTeams,
   goalCategories,
@@ -3587,7 +3623,7 @@ function MyPageTab({
   resetDateSchedule,
 }: {
   profile: Profile;
-  accessToken: string;
+  pushHealth: string;
   teams: Team[];
   allTeams: Team[];
   goalCategories: GoalCategory[];
@@ -3662,35 +3698,10 @@ function MyPageTab({
         return;
       }
 
-      const publicKeyResponse = await fetch("/api/push/public-key/");
-      const publicKeyResult = (await publicKeyResponse.json().catch(() => null)) as { publicKey?: string; error?: string } | null;
-      if (!publicKeyResponse.ok || !publicKeyResult?.publicKey) {
-        throw new Error(publicKeyResult?.error ?? "푸시 공개키를 불러오지 못했습니다.");
-      }
-
-      const registration = await navigator.serviceWorker.register("/sw.js");
-      const existingSubscription = await registration.pushManager.getSubscription();
-      const subscription =
-        existingSubscription ??
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: base64UrlToBytes(publicKeyResult.publicKey),
-        }));
-      const response = await fetch("/api/push/subscribe", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ subscription: subscription.toJSON() }),
-      });
-      const result = (await response.json().catch(() => null)) as { error?: string } | null;
-
-      if (!response.ok) {
-        throw new Error(result?.error ?? "알림 구독 저장에 실패했습니다.");
-      }
-
-      setPushMessage("이 기기에서 합주 알림을 받을 수 있어요.");
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user.id !== profile.id) throw new Error("로그인 상태를 다시 확인해 주세요.");
+      const result = await syncPushSubscription(profile.id, data.session.access_token, true, true);
+      setPushMessage(result.message);
     } catch (error) {
       setPushMessage(getErrorMessage(error));
     } finally {
@@ -3703,11 +3714,13 @@ function MyPageTab({
     setPushMessage("");
 
     try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user.id !== profile.id) throw new Error("로그인 상태를 다시 확인해 주세요.");
       const response = await fetch("/api/push/test", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${accessToken}`,
+          authorization: `Bearer ${data.session.access_token}`,
         },
         body: JSON.stringify({ kind }),
       });
@@ -3726,8 +3739,8 @@ function MyPageTab({
   }
 
   return (
-    <div className="space-y-3">
-      <MobilePanel>
+    <div className="mypage-layout space-y-3">
+      <MobilePanel className="mypage-profile">
         <p className="text-xs font-semibold text-[#ef6351]">마이페이지</p>
         <div className="mt-2 flex items-start justify-between gap-3">
           <div>
@@ -3740,21 +3753,24 @@ function MyPageTab({
             {profileRoleLabel(profile.role)}
           </span>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <ProfileStat label="누적 합주시간" value={formatDuration(rehearsalStats.totalDuration)} />
+        <div className="mypage-stats mt-4 grid grid-cols-2 gap-2">
+          <div className="mypage-time min-w-0 rounded-lg border border-[#f0ded7] bg-white p-3">
+            <p className="text-xs font-semibold text-slate-500">누적 합주시간</p>
+            <p className="mt-1 break-words text-sm font-semibold leading-5 text-slate-950">{formatDuration(rehearsalStats.totalDuration)}</p>
+          </div>
           <button
             type="button"
             onClick={() => setShowsLeaderboard((current) => !current)}
-            className="min-h-16 rounded-lg border border-[#f0ded7] bg-white p-2 text-left transition hover:border-[#efb7ae]"
+            className="mypage-rank min-w-0 rounded-lg border border-[#f0ded7] bg-white p-3 text-left"
             aria-expanded={showsLeaderboard}
           >
-            <p className="text-[11px] font-semibold text-slate-500">합주 시간 순위</p>
+            <p className="text-xs font-semibold text-slate-500">합주 시간 순위</p>
             <p className="mt-1 break-words text-sm font-semibold leading-5 text-slate-950">{rehearsalRank}</p>
             <p className="mt-1 text-[10px] font-semibold text-[#be3d33]">{showsLeaderboard ? "접기" : "상위 10명 보기"}</p>
           </button>
         </div>
         {showsLeaderboard && (
-          <div className="mt-3 rounded-lg border border-[#f0ded7] bg-white p-3">
+          <div className="mypage-leaderboard mt-3 rounded-lg border border-[#f0ded7] bg-white p-3">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-sm font-semibold text-slate-900">합주 시간 리더보드</p>
               <p className="text-[11px] font-semibold text-slate-500">상위 10명</p>
@@ -3781,7 +3797,7 @@ function MyPageTab({
         )}
       </MobilePanel>
 
-      <MobilePanel title="소속 팀">
+      <MobilePanel title="소속 팀" className="mypage-teams">
         <label className="mb-3 block">
           <span className="text-xs font-semibold text-slate-500">합주 목표</span>
           <select
@@ -3800,7 +3816,7 @@ function MyPageTab({
             ))}
           </select>
         </label>
-        <div className={`space-y-2 ${teamListClassName}`}>
+        <div className={`mypage-membership-list space-y-2 ${teamListClassName}`}>
           {filteredMemberships.map(({ team, role }) => (
             <div key={team.id} className="rounded-lg border border-[#f0ded7] bg-white px-3 py-3">
               <p className="text-sm font-semibold">
@@ -3815,7 +3831,7 @@ function MyPageTab({
         </div>
       </MobilePanel>
 
-      <MobilePanel title="내 시간표 편집">
+      <MobilePanel title="내 시간표 편집" className="mypage-schedule">
         <p className="mb-3 text-xs leading-5 text-slate-500">
           고정 요일 시간표는 기본으로 적용되고, 날짜별 수정은 선택한 날짜에만 적용됩니다. 수정 후 저장해야 반영됩니다.
         </p>
@@ -3854,11 +3870,11 @@ function MyPageTab({
         />
       </MobilePanel>
 
-      <MobilePanel title="푸시 알림">
+      <MobilePanel title="푸시 알림" className="mypage-push">
         <p className="text-xs leading-5 text-slate-500">
           합주 당일 오전 9시, 시작 30분 전, 일정 추가/취소 알림을 받을 수 있습니다. 새 기기를 등록하면 이전 기기의 알림은 해제됩니다. iPhone은 홈 화면에 추가한 Andante에서 허용해야 안정적으로 동작합니다.
         </p>
-        {pushMessage && <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{pushMessage}</p>}
+        {(pushMessage || pushHealth) && <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{pushMessage || pushHealth}</p>}
         <button
           type="button"
           onClick={enablePushNotifications}
@@ -4075,8 +4091,8 @@ function TeamTab({
   }
 
   return (
-    <div className="space-y-3">
-      <MobilePanel title={mode === "create" ? "팀 생성" : "팀 편집"}>
+    <div className="team-layout space-y-3">
+      <MobilePanel className="team-editor" title={mode === "create" ? "팀 생성" : "팀 편집"}>
         <div className="mb-4 grid grid-cols-2 gap-2">
           {([
             { id: "create", label: "생성" },
@@ -4186,7 +4202,7 @@ function TeamTab({
         </button>
       </MobilePanel>
 
-      <MobilePanel title="등록된 팀">
+      <MobilePanel title="등록된 팀" className="team-directory">
         <div className="space-y-3">
           <GoalCategorySelect
             label="조회할 합주 목표"
@@ -4557,7 +4573,7 @@ function AdminTab({
   deleteGoalCategory: (categoryId: string) => Promise<void>;
   addTeam: (payload: NewTeamPayload) => Promise<void>;
   updateTeam: (payload: UpdateTeamPayload) => Promise<void>;
-  cancelBooking: (bookingId: string, reason: string) => Promise<void>;
+  cancelBooking: (bookingId: string, reason: string) => Promise<boolean>;
   saveWeeklySchedule: (userId: string, nextBusyKeys: string[]) => Promise<void>;
   saveDateSchedule: (userId: string, drafts: DateScheduleDrafts) => Promise<void>;
   resetDateSchedule: (userId: string, date: string) => Promise<void>;
@@ -4597,8 +4613,8 @@ function AdminTab({
   }
 
   return (
-    <div className="space-y-3">
-      <MobilePanel>
+    <div className="admin-layout space-y-3">
+      <MobilePanel className="admin-summary">
         <p className="text-xs font-semibold text-[#ef6351]">관리자</p>
         <h3 className="mt-1 text-xl font-semibold">승인과 운영 관리</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -4695,7 +4711,7 @@ function AdminTab({
       )}
 
       <MobilePanel title="가입 승인">
-        <div className="space-y-2">
+        <div className="admin-record-list space-y-2">
           {pendingProfiles.map((item) => (
             <div key={item.id} className="rounded-lg border border-[#f0ded7] bg-white p-3">
               <div className="flex items-start justify-between gap-2">
@@ -4735,7 +4751,7 @@ function AdminTab({
             </button>
           </div>
 
-          <div className="space-y-2">
+          <div className="admin-record-list space-y-2">
             {goalCategories.map((category) => (
               <div key={category.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0ded7] bg-white p-3">
                 <p className="text-sm font-semibold">{category.name}</p>
@@ -4755,34 +4771,9 @@ function AdminTab({
         </div>
       </MobilePanel>
 
-      <MobilePanel title="예약 취소">
-        <div className="space-y-2">
-          {reservations.map((reservation) => (
-            <div key={reservation.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0ded7] bg-white p-3">
-              <div>
-                <p className="text-sm font-semibold">{reservation.teamName}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {reservation.bookingDate ? formatDateLabel(reservation.bookingDate) : `${reservation.day}요일`} {reservation.start} ·{" "}
-                  {formatDuration(reservation.duration)}
-                </p>
-                {reservation.bookingType === "room_block" && (
-                  <p className="mt-1 text-[11px] text-amber-700">{reservation.purpose}</p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => cancelBooking(reservation.id, "관리자 취소")}
-                className="rounded-md bg-[#fff0eb] px-2 py-1 text-xs font-semibold text-[#be3d33]"
-              >
-                취소
-              </button>
-            </div>
-          ))}
-          {reservations.length === 0 && <EmptyText text="확정된 예약이 없습니다." />}
-        </div>
-      </MobilePanel>
+      <AdminBookingCancellationPanel reservations={reservations} onCancel={cancelBooking} />
 
-      <MobilePanel title="부원 시간표 수정">
+      <MobilePanel title="부원 시간표 수정" className="admin-schedule">
         <AdminScheduleEditor
           profiles={approvedProfiles}
           busyByUser={busyByUser}
@@ -4803,6 +4794,97 @@ function AdminTab({
 
     </div>
   );
+}
+
+function AdminBookingCancellationPanel({ reservations, onCancel }: {
+  reservations: Reservation[];
+  onCancel: (bookingId: string, reason: string) => Promise<boolean>;
+}) {
+  const today = todayISO();
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [anchorDate, setAnchorDate] = useState(today);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [message, setMessage] = useState("");
+  const byDate = useMemo(() => {
+    const grouped = new Map<string, Reservation[]>();
+    for (const reservation of reservations) {
+      if (reservation.status !== "confirmed") continue;
+      const date = reservationDisplayDate(reservation);
+      grouped.set(date, [...(grouped.get(date) ?? []), reservation]);
+    }
+    for (const entries of grouped.values()) entries.sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+    return grouped;
+  }, [reservations]);
+  const selectedReservations = byDate.get(selectedDate) ?? [];
+
+  function selectDate(date: string) {
+    if (isCancelling) return;
+    setSelectedDate(date); setPendingId(null); setMessage("");
+  }
+  function changePeriod(date: string) {
+    setAnchorDate(date); selectDate(date);
+  }
+  async function confirmCancellation(bookingId: string) {
+    if (isCancelling || pendingId !== bookingId) return;
+    setIsCancelling(true); setMessage("");
+    try {
+      const cancelled = await onCancel(bookingId, "관리자 취소");
+      if (cancelled) { setPendingId(null); setMessage("예약을 취소했습니다."); }
+      else setMessage("예약을 취소하지 못했습니다. 다시 시도해 주세요.");
+    } catch (error) { setMessage(getErrorMessage(error)); }
+    finally { setIsCancelling(false); }
+  }
+
+  return <MobilePanel title="예약 취소" className="admin-cancellations">
+    <div className="admin-cancellation-layout">
+      <div className="admin-cancellation-calendar">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold">{formatDateShort(anchorDate)} – {formatDateShort(addDays(anchorDate, 20))}</p>
+          <div className="flex items-center gap-1">
+            <button type="button" title="이전 기간" aria-label="이전 기간" disabled={isCancelling || anchorDate <= today}
+              onClick={() => changePeriod(addDays(anchorDate, -21) < today ? today : addDays(anchorDate, -21))}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white disabled:opacity-30"><ChevronLeft size={18} /></button>
+            <button type="button" disabled={isCancelling} onClick={() => changePeriod(today)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold">오늘</button>
+            <button type="button" title="다음 기간" aria-label="다음 기간" disabled={isCancelling} onClick={() => changePeriod(addDays(anchorDate, 21))}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white disabled:opacity-30"><ChevronRight size={18} /></button>
+          </div>
+        </div>
+        <ThreeWeekCalendar selectedDate={selectedDate} onSelectDate={selectDate} anchorDate={anchorDate} compact disabled={isCancelling}
+          hasMarker={(date) => (byDate.get(date)?.length ?? 0) > 0}
+          dateLabel={(date) => `${formatDateLabel(date)} ${byDate.get(date)?.length ?? 0}건 예약`} />
+      </div>
+      <div className="admin-cancellation-list" aria-live="polite" aria-busy={isCancelling}>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold">{formatDateLabel(selectedDate)}</h4>
+          <span className="text-xs text-slate-500">{selectedReservations.length}건</span>
+        </div>
+        {message && <p role="status" className="mb-3 text-xs leading-5 text-slate-600">{message}</p>}
+        {selectedReservations.length === 0 ? <EmptyText text="선택한 날짜에 취소할 예약이 없습니다." /> :
+          <div className="function-group">
+            {selectedReservations.map((reservation) => <article key={reservation.id}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">{reservation.start}–{addHours(reservation.start, reservation.duration)}</p>
+                  <p className="mt-1 break-words text-sm">{reservation.teamName}</p>
+                  <p className="mt-1 text-xs text-slate-500">{reservation.bookingType === "room_block" ? "사용 제한" : reservation.location === "external" ? "외부 합주실" : "동아리방"} · {reservation.purpose || reservation.teamSong}</p>
+                </div>
+                <button type="button" disabled={isCancelling} aria-label={`${reservation.teamName} ${reservation.start} 예약 취소`}
+                  onClick={() => { setPendingId(reservation.id); setMessage(""); }}
+                  className="flex h-9 shrink-0 items-center gap-1 rounded-lg bg-[#fff0eb] px-3 text-xs font-semibold text-[#be3d33] disabled:opacity-40"><Trash2 size={14} />취소</button>
+              </div>
+              {pendingId === reservation.id && <div role="group" aria-label="예약 취소 확인" className="mt-3 border-t border-slate-200 pt-3">
+                <p className="text-xs font-semibold leading-5">이 예약을 취소할까요?</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button type="button" disabled={isCancelling} onClick={() => setPendingId(null)} className="h-9 rounded-lg border border-slate-200 bg-white text-xs font-semibold">돌아가기</button>
+                  <button type="button" disabled={isCancelling} onClick={() => void confirmCancellation(reservation.id)} className="h-9 rounded-lg bg-[#ff665a] text-xs font-semibold text-white disabled:opacity-40">{isCancelling ? "취소 중…" : "예약 취소 확정"}</button>
+                </div>
+              </div>}
+            </article>)}
+          </div>}
+      </div>
+    </div>
+  </MobilePanel>;
 }
 
 function PushSubscriptionStatusPanel({ statuses }: { statuses: PushSubscriptionStatus[] }) {
@@ -5120,7 +5202,8 @@ function AdminScheduleEditor({
       : dateDayNames.map((day) => ({ label: day, day }));
 
   return (
-    <div className="space-y-3">
+    <div className="admin-schedule-editor space-y-3">
+      <div className="admin-member-search">
       <ProfileSearchPicker
         label="부원 검색"
         value={effectiveSelectedUserId}
@@ -5129,9 +5212,11 @@ function AdminScheduleEditor({
         onChange={setSelectedUserId}
         profiles={memberProfiles}
       />
+      </div>
 
       {selectedProfile ? (
         <>
+          <div className="admin-schedule-controls space-y-3">
           <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-slate-700">
             {selectedProfile.name} 부원의 고정 요일 시간표와 날짜별 시간표를 관리자 권한으로 수정합니다.
           </p>
@@ -5160,6 +5245,7 @@ function AdminScheduleEditor({
               </p>
             </div>
           )}
+          </div>
           <ScheduleGrid
             key={selectedProfile.id}
             busy={scheduleScope === "date" ? selectedDateBusy : ownBusy}
@@ -5563,7 +5649,7 @@ function TeamSearchPicker({
 
 function MobilePanel({ title, children, className = "" }: { title?: string; children: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-lg border border-[#f0ded7] bg-white/88 p-4 shadow-sm ${className}`}>
+    <section aria-label={title} className={`workspace-panel min-w-0 rounded-lg border border-[#f0ded7] bg-white/88 p-4 shadow-sm ${className}`}>
       {title && <h3 className="mb-3 text-sm font-semibold text-slate-900">{title}</h3>}
       {children}
     </section>
@@ -5581,11 +5667,13 @@ function ProfileStat({ label, value }: { label: string; value: string }) {
 
 function ReservationDetailPanel({
   title,
+  className = "",
   date,
   reservations,
   ownTeamIds,
 }: {
   title?: string;
+  className?: string;
   date: string;
   reservations: Reservation[];
   ownTeamIds: ReadonlySet<string>;
@@ -5595,8 +5683,8 @@ function ReservationDetailPanel({
     .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
   return (
-    <MobilePanel title={title ?? `${formatDateLabel(date)} 예약 상세`} className="readable-compact">
-      <div className="space-y-1">
+    <MobilePanel title={title ?? `${formatDateLabel(date)} 예약 상세`} className={`readable-compact ${className}`}>
+      <div className="function-group space-y-1">
         {dayReservations.map((reservation) => {
           const isMine = ownTeamIds.has(reservation.teamId);
           const isRoomBlock = reservation.bookingType === "room_block";
@@ -5604,7 +5692,7 @@ function ReservationDetailPanel({
           return (
             <article
               key={reservation.id}
-              className={`rounded-md border p-2 ${
+              className={`reservation-detail-card rounded-md border p-2 ${
                 isRoomBlock
                   ? "border-amber-200 bg-amber-50/70"
                   : isMine
@@ -5681,14 +5769,16 @@ function ScheduleGrid({
   onResetDateOverride?: () => Promise<void>;
 }) {
   const [selectedBandId, setSelectedBandId] = useState(timeBands[0].id);
-  const [editMode, setEditMode] = useState<ScheduleEditMode | null>(null);
+  const [editMode, setEditMode] = useState<"busy" | "free" | null>(null);
   const [weeklyDraftBusy, setWeeklyDraftBusy] = useState<string[]>(busy);
   const [dateDrafts, setDateDrafts] = useState<DateScheduleDrafts>({});
   const [saveError, setSaveError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const isPaintingRef = useRef(false);
+  const paintBusyRef = useRef(true);
+  const gridRef = useRef<HTMLDivElement>(null);
   const selectedBand = timeBands.find((band) => band.id === selectedBandId) ?? timeBands[0];
-  const gridColumns: ScheduleColumn[] = columns ?? days.map((day) => ({ label: day, day }));
+  const gridColumns: ScheduleColumn[] = useMemo(() => columns ?? days.map((day) => ({ label: day, day })), [columns]);
   const selectedScheduleDate = gridColumns.length === 1 ? gridColumns[0].date : undefined;
   const draftBusy = selectedScheduleDate ? dateDrafts[selectedScheduleDate] ?? busy : weeklyDraftBusy;
   const pendingDateCount = Object.keys(dateDrafts).length;
@@ -5720,8 +5810,8 @@ function ScheduleGrid({
   }
 
   const paintSlot = useCallback(
-    (column: ScheduleColumn, time: string) => {
-      if (!editMode || isSaving) {
+    (column: ScheduleColumn, time: string, nextBusyState: boolean) => {
+      if (isSaving || !editMode) {
         return;
       }
 
@@ -5729,8 +5819,6 @@ function ScheduleGrid({
       if (rehearsals.includes(key)) {
         return;
       }
-
-      const nextBusyState = editMode === "busy";
 
       setDraftBusy((current) => {
         const isAlreadyBusy = current.includes(key);
@@ -5751,28 +5839,36 @@ function ScheduleGrid({
   useEffect(() => {
     window.addEventListener("pointerup", finishPainting);
     window.addEventListener("pointercancel", finishPainting);
+    window.addEventListener("blur", finishPainting);
 
     return () => {
       window.removeEventListener("pointerup", finishPainting);
       window.removeEventListener("pointercancel", finishPainting);
+      window.removeEventListener("blur", finishPainting);
     };
   }, [finishPainting]);
 
   function startPainting(column: ScheduleColumn, time: string, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || isSaving || !editMode) return;
+    const key = getColumnKey(column, time);
+    if (rehearsals.includes(key)) return;
     event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
     isPaintingRef.current = true;
-    if (editMode) {
-      paintSlot(column, time);
-    }
+    paintBusyRef.current = editMode === "busy";
+    paintSlot(column, time, paintBusyRef.current);
   }
 
   function continuePainting(event: ReactPointerEvent<HTMLDivElement>) {
     if (!isPaintingRef.current) {
       return;
     }
+    if (event.pointerType !== "touch" && event.buttons === 0) { finishPainting(); return; }
 
     event.preventDefault();
     const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-schedule-cell]") as HTMLElement | null;
+    if (!target || !gridRef.current?.contains(target)) return;
     const columnIndex = Number(target?.dataset.scheduleColumnIndex);
     const time = target?.dataset.scheduleTime;
     const column = gridColumns[columnIndex];
@@ -5781,7 +5877,7 @@ function ScheduleGrid({
       return;
     }
 
-    paintSlot(column, time);
+    paintSlot(column, time, paintBusyRef.current);
   }
 
   async function saveDraft() {
@@ -5836,7 +5932,8 @@ function ScheduleGrid({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="schedule-editor space-y-3">
+      <p className="text-xs leading-5 text-slate-500">칠하기 또는 지우기를 선택한 뒤 시간표를 터치하거나 드래그해 수정해 주세요. 수정 후 저장해 주세요.</p>
       <div className="grid grid-cols-4 gap-1">
         {timeBands.map((band) => (
           <button
@@ -5866,31 +5963,25 @@ function ScheduleGrid({
           </button>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        {([
-          { id: "busy", label: "불가로 칠하기", className: "border-[#ffb3aa] bg-[#fff0eb] text-[#be3d33]" },
-          { id: "free", label: "가능으로 지우기", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-        ] as Array<{ id: ScheduleEditMode; label: string; className: string }>).map((mode) => (
-          <button
-            key={mode.id}
-            type="button"
-            onClick={() => setEditMode((current) => (current === mode.id ? null : mode.id))}
-            className={`h-10 rounded-lg border text-xs font-semibold transition ${
-              editMode === mode.id ? mode.className : "border-[#f0ded7] bg-white text-slate-500"
-            }`}
-          >
+      <div className="grid grid-cols-2 gap-2" role="group" aria-label="시간표 편집 방식">
+        {([{ id: "busy", label: "불가로 칠하기" }, { id: "free", label: "가능으로 지우기" }] as const).map((mode) => (
+          <button key={mode.id} type="button" disabled={isSaving} aria-pressed={editMode === mode.id}
+            onClick={() => setEditMode((current) => current === mode.id ? null : mode.id)}
+            className={`h-10 rounded-lg border text-xs font-semibold ${editMode === mode.id ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white text-slate-600"}`}>
             {mode.label}
           </button>
         ))}
       </div>
       <div className="flex items-center justify-between text-xs text-slate-500">
         <span>{selectedBand.label} 시간대</span>
-        <span>{editMode ? (editMode === "busy" ? "누르면 불가" : "누르면 가능") : "먼저 모드 선택"}</span>
+        <span>{editMode ? (editMode === "busy" ? "불가로 칠하기" : "가능으로 지우기") : "먼저 모드 선택"}</span>
       </div>
       <div
-        className={`grid select-none gap-1 ${editMode ? "touch-none" : "touch-pan-y"}`}
-        style={{ gridTemplateColumns }}
+        ref={gridRef}
+        className="schedule-cell-grid grid select-none gap-1"
+        style={{ gridTemplateColumns, touchAction: editMode ? "none" : "pan-y" }}
         onPointerMove={continuePainting}
+        onContextMenu={(event) => { if ((event.target as Element).closest("[data-schedule-cell]")) event.preventDefault(); }}
       >
         <div />
         {gridColumns.map((column) => (
@@ -5907,6 +5998,8 @@ function ScheduleGrid({
             rehearsals={rehearsals}
             getColumnKey={getColumnKey}
             onStartPaint={startPainting}
+            onToggle={(column, time) => paintSlot(column, time, editMode === "busy")}
+            isSaving={isSaving}
           />
         ))}
       </div>
@@ -5962,6 +6055,8 @@ function MemberScheduleRow({
   rehearsals,
   getColumnKey,
   onStartPaint,
+  onToggle,
+  isSaving,
 }: {
   time: string;
   columns: ScheduleColumn[];
@@ -5969,6 +6064,8 @@ function MemberScheduleRow({
   rehearsals: string[];
   getColumnKey: (column: ScheduleColumn, time: string) => string;
   onStartPaint: (column: ScheduleColumn, time: string, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onToggle: (column: ScheduleColumn, time: string) => void;
+  isSaving: boolean;
 }) {
   return (
     <>
@@ -5982,11 +6079,13 @@ function MemberScheduleRow({
           <button
             key={key}
             type="button"
-            disabled={hasRehearsal}
+            disabled={hasRehearsal || isSaving}
             data-schedule-cell="true"
             data-schedule-column-index={index}
             data-schedule-time={time}
             onPointerDown={(event) => onStartPaint(column, time, event)}
+            onClick={(event) => { if (event.detail === 0) onToggle(column, time); }}
+            aria-pressed={isBusy}
             className={`h-9 rounded-md border text-[10px] font-semibold transition ${
               hasRehearsal
                 ? "border-amber-100 bg-amber-50 text-amber-800"

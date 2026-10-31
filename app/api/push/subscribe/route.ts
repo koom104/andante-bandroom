@@ -9,6 +9,8 @@ const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_dKyziP5Nq6fTyZWkUd5OQQ_D5oyYD2P";
 
 type SubscribeBody = {
+  mode?: string;
+  previousEndpoint?: string;
   subscription?: {
     endpoint?: string;
     keys?: {
@@ -77,7 +79,7 @@ export async function POST(request: NextRequest) {
 
   const { data: profile, error: profileError } = await requesterClient
     .from("profiles")
-    .select("id,status")
+    .select("id,status,password_reset_required")
     .eq("id", userData.user.id)
     .maybeSingle();
 
@@ -85,8 +87,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "부원 승인 상태를 확인하지 못했습니다." }, { status: 500 });
   }
 
-  if (!profile || profile.status !== "approved") {
+  if (!profile || profile.status !== "approved" || profile.password_reset_required) {
     return NextResponse.json({ error: "승인된 부원만 알림을 받을 수 있습니다." }, { status: 403 });
+  }
+
+  // Passive renewal must never replace the device the member explicitly chose.
+  if (body.mode === "refresh") {
+    const { data: rows, error: readError } = await requesterClient.rpc("get_my_push_subscriptions");
+    if (readError) return NextResponse.json({ error: "알림 등록 상태를 확인하지 못했습니다." }, { status: 500 });
+    const active = (rows ?? []).find((row: { endpoint: string }) => row.endpoint === endpoint || row.endpoint === body.previousEndpoint);
+    if (!active) {
+      return NextResponse.json({ error: "현재 이 기기가 알림 수신 기기로 등록되어 있지 않습니다. 이 기기에서 알림 받기를 다시 눌러 주세요." }, { status: 409 });
+    }
+    if (active.endpoint === endpoint && active.p256dh === p256dh && active.auth_key === auth) {
+      return NextResponse.json({ ok: true });
+    }
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceKey) return NextResponse.json({ error: "알림 구독 자동 갱신을 사용할 수 없습니다. 이 기기에서 알림 받기를 다시 눌러 주세요." }, { status: 503 });
+    const serviceClient = createClient(SUPABASE_URL, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { data: updated, error: updateError } = await serviceClient.from("push_subscriptions")
+      .update({ endpoint, p256dh, auth_key: auth, updated_at: new Date().toISOString() })
+      .eq("id", active.id).eq("user_id", userData.user.id).eq("endpoint", active.endpoint)
+      .eq("p256dh", active.p256dh).eq("auth_key", active.auth_key).is("disabled_at", null).select("id");
+    if (updateError || !updated?.length) return NextResponse.json({ error: "알림 등록이 변경되었습니다. 이 기기에서 알림 받기를 다시 눌러 주세요." }, { status: 409 });
+    return NextResponse.json({ ok: true });
   }
 
   const { error } = await requesterClient.rpc("save_push_subscription", {

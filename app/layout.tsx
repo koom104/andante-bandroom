@@ -1,5 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./liquid-workspace.css";
+import "./system-theme.css";
+import { AppearanceSync } from "./appearance";
+
+const appearanceBootstrap = `(function(){try{var p=localStorage.getItem('andante-appearance');document.documentElement.dataset.theme=(p==='dark'||(p!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches))?'dark':'light'}catch(e){document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}})();`;
 
 export const metadata: Metadata = {
   title: "Andante",
@@ -22,7 +27,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#ff665a",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f3f5f5" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+  ],
 };
 
 export default function RootLayout({
@@ -31,8 +39,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko">
-      <body>{children}</body>
+    <html lang="ko" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: appearanceBootstrap }} /></head>
+      <body><AppearanceSync />{children}</body>
     </html>
   );
 }

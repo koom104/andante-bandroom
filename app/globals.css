@@ -1,5 +1,23 @@
 @import "tailwindcss";
 
+.calendar-team-legend { display:flex;gap:18px;flex-wrap:wrap;margin:0 0 18px;font-size:12px;color:#637083; }
+.calendar-team-legend span { display:inline-flex;align-items:center;gap:7px; }
+.calendar-team-legend i { width:8px;height:8px;border-radius:50%; }
+.calendar-own-dot { background:#e55f4f; }
+.calendar-other-dot { background:#efc6be; }
+.calendar-history-jump { display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:#637083;margin:0 0 10px; }
+.calendar-history-jump input { max-width:160px;min-width:0;border:1px solid #dce1e8;border-radius:8px;padding:6px 9px;background:transparent;color:inherit;font:inherit; }
+.calendar-history-records { display:grid;gap:10px; }
+.calendar-history-record { padding:15px 16px;border:1px solid;border-radius:12px; }
+.calendar-history-record.is-own-team { background:#ffe6de;border-color:#e98572;color:#772d25; }
+.calendar-history-record.is-other-team { background:#fffaf8;border-color:#eeded9;color:#735d58; }
+.calendar-record-heading { display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:14px; }
+.calendar-record-title { margin:7px 0 0;font-size:14px;font-weight:600;overflow-wrap:anywhere; }
+.calendar-record-meta { margin:5px 0 0;font-size:12px;line-height:1.6;opacity:.85; }
+.calendar-own-badge { padding:3px 7px;background:#d95c48;color:#fff;border-radius:6px;font-size:10px;font-weight:700;white-space:nowrap; }
+[data-theme="dark"] .calendar-history-record.is-own-team { background:#54322d;border-color:#c77866;color:#ffded5; }
+[data-theme="dark"] .calendar-history-record.is-other-team { background:#262321;border-color:#4a3c36;color:#c7b7af; }
+
 :root {
   --background: #f6f7f9;
   --foreground: #171717;
@@ -151,5 +169,321 @@ html {
   .app-scroll select.reservation-team-select,
   .app-shell-scroll select.reservation-team-select {
     font-size: 13px !important;
+  }
+}
+
+.workspace-brand,
+.workspace-nav-icon,
+.workspace-desktop-label,
+.workspace-desktop-only {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .workspace-navigation.mobile-nav-hidden {
+    display: none;
+  }
+}
+
+/* Desktop uses the same views and controls inside a wider workspace. */
+@media (min-width: 1024px) {
+  .workspace-viewport {
+    background: #f6f7f9;
+    padding: 0;
+  }
+
+  .workspace-frame {
+    max-width: 1600px;
+  }
+
+  .workspace-shell {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    max-width: none;
+    background: #f6f7f9;
+    box-shadow: none;
+  }
+
+  .workspace-header {
+    grid-column: 2;
+    grid-row: 1;
+    padding: 20px 28px 16px;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .workspace-header > div > div > p {
+    display: none;
+  }
+
+  .workspace-header h2 {
+    margin-top: 0;
+    font-size: 22px;
+    line-height: 30px;
+  }
+
+  .workspace-header > p {
+    margin-top: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .workspace-header button {
+    height: 44px;
+    min-width: 96px;
+  }
+
+  .workspace-content {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    min-height: 0;
+    padding: 24px 28px 36px;
+    scroll-padding-top: 24px;
+    scroll-padding-bottom: 36px;
+  }
+
+  .workspace-navigation {
+    position: relative;
+    inset: auto;
+    grid-column: 1;
+    grid-row: 1 / -1;
+    overflow-y: auto;
+    padding: 28px 16px;
+    border: 0;
+    border-right: 1px solid #e5e7eb;
+    background: #fff;
+    backdrop-filter: none;
+  }
+
+  .workspace-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 4px 32px;
+  }
+
+  .workspace-brand img {
+    flex: 0 0 36px;
+    border-radius: 6px;
+  }
+
+  .workspace-brand p {
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 700;
+  }
+
+  .workspace-brand span {
+    font-size: 11px;
+    line-height: 18px;
+    color: #64748b;
+  }
+
+  .workspace-nav-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 6px;
+  }
+
+  .workspace-nav-item {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    height: 46px;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+
+  .workspace-nav-item[aria-current="page"] {
+    background: #fff0eb;
+    color: #b24439;
+  }
+
+  .workspace-nav-icon,
+  .workspace-desktop-label,
+  .workspace-desktop-only {
+    display: block;
+  }
+
+  .workspace-nav-icon {
+    flex-shrink: 0;
+  }
+
+  .workspace-mobile-label {
+    display: none;
+  }
+
+  .workspace-panel {
+    padding: 20px;
+    background: #fff;
+    border-color: #e5e7eb;
+    box-shadow: none;
+  }
+
+  .workspace-panel > h3 {
+    margin-bottom: 16px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .home-layout,
+  .calendar-layout,
+  .mypage-layout,
+  .team-layout,
+  .admin-layout,
+  .reservation-layout,
+  .reservation-slots,
+  .admin-schedule-editor {
+    display: grid;
+    align-items: start;
+    gap: 20px;
+  }
+
+  :is(.home-layout, .calendar-layout, .mypage-layout, .team-layout, .admin-layout, .reservation-layout, .reservation-slots, .admin-schedule-editor) > * {
+    min-width: 0;
+    margin-block: 0 !important;
+  }
+
+  .home-layout {
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    grid-template-areas: "room today" "agenda today" "manage today";
+  }
+
+  .home-room { grid-area: room; }
+  .home-agenda { grid-area: agenda; }
+  .home-management { grid-area: manage; }
+  .home-today { grid-area: today; }
+
+  .calendar-layout {
+    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr);
+  }
+
+  .calendar-expand,
+  .calendar-dots {
+    display: none;
+  }
+
+  .calendar-panel .calendar-day {
+    height: 160px;
+    padding: 6px 4px;
+  }
+
+  .calendar-panel .calendar-events {
+    display: block;
+  }
+
+  .calendar-events > span {
+    padding: 2px 3px;
+    line-height: 14px;
+  }
+
+  .calendar-details {
+    position: sticky;
+    top: 0;
+  }
+
+  .reservation-layout {
+    grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
+  }
+
+  .reservation-slots {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reservation-controls {
+    padding: 20px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .reservation-controls > .workspace-panel {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .reservation-controls > .workspace-panel > h3 {
+    margin-bottom: 10px;
+  }
+
+  .booking-slot-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 40px;
+    align-items: center;
+    gap: 4px 10px;
+    min-height: 72px;
+  }
+
+  .booking-slot-summary { grid-column: 1; grid-row: 1; }
+  .booking-slot-absent { grid-column: 1; grid-row: 2; margin-top: 0; }
+
+  .booking-slot-toggle {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    margin-top: 0;
+  }
+
+  .reservation-placeholder {
+    padding-top: 20px;
+  }
+
+  .mypage-layout {
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+    grid-template-areas: "profile schedule" "teams schedule" "push schedule";
+  }
+
+  .mypage-profile { grid-area: profile; }
+  .mypage-teams { grid-area: teams; }
+  .mypage-schedule { grid-area: schedule; }
+  .mypage-push { grid-area: push; }
+
+  .schedule-editor [data-schedule-cell] {
+    min-height: 40px;
+  }
+
+  .team-layout {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  }
+
+  .team-directory {
+    position: sticky;
+    top: 0;
+  }
+
+  .admin-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-summary,
+  .admin-schedule {
+    grid-column: 1 / -1;
+  }
+
+  .admin-schedule-editor {
+    grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.25fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "search schedule" "controls schedule";
+  }
+
+  .admin-member-search { grid-area: search; }
+  .admin-schedule-controls { grid-area: controls; }
+  .admin-schedule-editor > .schedule-editor { grid-area: schedule; }
+}
+
+@media (min-width: 1440px) {
+  .workspace-shell {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .reservation-slots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
