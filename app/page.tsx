@@ -3256,7 +3256,7 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
   function changePeriod(date: string) { setAnchorDate(date); setSelectedDate(null); }
   return (
     <div className="space-y-3">
-      <MobilePanel title="캘린더" className="readable-compact">
+      <MobilePanel title="캘린더" className="calendar-panel readable-compact">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold" aria-live="polite">
             {anchorDate.slice(0, 4)}.{formatDateShort(anchorDate)} – {formatDateShort(addDays(anchorDate, 20))}
