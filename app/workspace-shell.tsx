@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { CalendarDays, CalendarPlus, Disc3, House, Settings, UserRound, Users } from "lucide-react";
+import { AppInfoTrigger } from "./app-info";
 
 export type WorkspaceTab = "booking" | "calendar" | "suggestions" | "my" | "team" | "admin" | "recap";
 
@@ -41,7 +42,7 @@ export function WorkspaceShell({ header, children, tabs, activeTab, onChangeTab,
           <div className={`workspace-navigation app-tabbar absolute inset-x-0 bottom-0 border-t border-[#f0ded7] bg-[#fff8f4]/95 px-4 pt-3 backdrop-blur ${hideNavigation ? "mobile-nav-hidden" : ""}`}>
             <div className="workspace-brand">
               <img src="/icon-192.png" alt="" width={36} height={36} />
-              <div><p>Andante</p><span>합주 일정 관리</span></div>
+              <div><AppInfoTrigger className="workspace-brand-trigger" /><span>합주 일정 관리</span></div>
             </div>
             <nav className="workspace-nav-grid grid gap-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`, "--tab-count": tabs.length, "--active-index": Math.max(0, tabs.findIndex((tab) => tab.id === activeTab)) } as CSSProperties} aria-label="앱 탭">
               <span className="workspace-nav-lens" aria-hidden="true" />

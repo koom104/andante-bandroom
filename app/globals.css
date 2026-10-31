@@ -71,10 +71,6 @@ html {
   font-size: 15px;
 }
 
-.typography-balanced .easter-egg-credit {
-  font-size: 9px;
-}
-
 /* Increase compact calendar and reservation copy without changing other tabs. */
 .readable-compact .text-\[8px\] {
   font-size: 9px;

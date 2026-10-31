@@ -1,0 +1,23 @@
+.app-info-trigger { padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:inherit; cursor:pointer; }
+.liquid-workspace .workspace-header .app-info-header { display:inline-block; min-width:0; width:auto; height:auto; padding:0; border:0; border-radius:4px; background:transparent; color:#57716d; box-shadow:none; font-size:12px; font-weight:700; line-height:18px; }
+.workspace-brand .workspace-brand-trigger { display:block; color:#34343b; font-size:20px; font-weight:700; line-height:28px; }
+.app-info-dialog { width:calc(100% - 40px); max-width:380px; max-height:calc(100dvh - 48px); margin:auto; padding:24px; overflow-y:auto; border:1px solid #dce3e3; border-radius:20px; background:#f8fafaf5; color:#263137; box-shadow:0 24px 80px #172a3330; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+.app-info-dialog::backdrop { background:#18262e55; backdrop-filter:blur(5px); }
+.app-info-heading, .app-info-identity { display:flex; align-items:center; gap:12px; }
+.app-info-heading { justify-content:space-between; }
+.app-info-identity img { border-radius:11px; }
+.app-info-heading h2 { margin:0; font-size:22px; font-weight:750; line-height:1.3; }
+.app-info-close { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:36px; height:36px; padding:0; border:1px solid #dce3e3; border-radius:50%; background:#fff9; color:#52616b; }
+.app-info-credit { margin:24px 0 16px; font-size:14px; line-height:1.7; }
+.app-info-github { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 15px; border:1px solid #dce3e3; border-radius:12px; background:#fff9; color:#304e59; font-size:14px; font-weight:650; text-decoration:none; }
+.app-info-github:hover { background:#fff; }
+.app-info-contact { margin-top:24px; padding-top:20px; border-top:1px solid #dce3e3; }
+.app-info-contact h3 { margin:0 0 8px; color:#69777f; font-size:12px; font-weight:600; }
+.app-info-contact p { margin:0; font-size:13px; line-height:1.8; word-break:keep-all; }
+.app-info-dialog :focus-visible, .app-info-trigger:focus-visible { outline:2px solid #617b86; outline-offset:4px; }
+:root[data-theme="dark"] .app-info-header, :root[data-theme="dark"] .workspace-brand-trigger { color:#e8e8ed; }
+:root[data-theme="dark"] .app-info-dialog { border-color:#34343c; background:#141416f5; color:#ededf1; }
+:root[data-theme="dark"] .app-info-close, :root[data-theme="dark"] .app-info-github { border-color:#34343c; background:#222226; color:#d6e0e5; }
+:root[data-theme="dark"] .app-info-contact { border-color:#34343c; }
+:root[data-theme="dark"] .app-info-contact h3 { color:#b8b8c2; }
+@media(min-width:1024px) { .liquid-workspace .workspace-header .app-info-header { display:none; } }

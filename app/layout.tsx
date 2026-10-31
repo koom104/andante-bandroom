@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./liquid-workspace.css";
 import "./system-theme.css";
+import "./app-info.css";
+import "./auth.css";
+import "./calendar.css";
 import { AppearanceSync } from "./appearance";
 
 const appearanceBootstrap = `(function(){try{var p=localStorage.getItem('andante-appearance');document.documentElement.dataset.theme=(p==='dark'||(p!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches))?'dark':'light'}catch(e){document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}})();`;

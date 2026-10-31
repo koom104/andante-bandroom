@@ -12,6 +12,7 @@ import { LoadingScreen, LoadingStatus } from "./loading-state";
 import { AppearanceSelector } from "./appearance";
 import { sessionDisplayOrder, sortTeamMembersBySession } from "./team-member-order";
 import { sortGoalCategories } from "./goal-order";
+import { AppInfoTrigger } from "./app-info";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
 const RecapTab = lazy(() => import("./recap-tab"));
@@ -2327,7 +2328,7 @@ export default function Home() {
 
   if (!session) {
     return (
-      <PhoneShell>
+      <PhoneShell className="auth-viewport">
         <AuthScreen onSignIn={signIn} onSignUp={signUp} notice={authNotice} />
       </PhoneShell>
     );
@@ -2495,21 +2496,16 @@ export default function Home() {
                   />
                 )}
 
-                {activeTab === "team" && (
-                  <p className="easter-egg-credit pb-8 pt-1 text-center text-[9px] font-medium text-[#f7e6df]" aria-hidden="true">
-                    @41기 구강민 만듦
-                  </p>
-                )}
     </WorkspaceShell>
   );
 }
 
-function PhoneShell({ children }: { children: ReactNode }) {
+function PhoneShell({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <main className="app-viewport bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5">
+    <main className={`app-viewport bg-[#fff8f4] text-slate-950 sm:bg-[#f9ebe6] sm:px-6 sm:py-5 ${className}`}>
       <div className="mx-auto flex h-full max-w-6xl items-center justify-center">
         <section className="typography-balanced relative flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-[#fff8f4] shadow-sm">
-          <div className="app-shell-scroll flex-1 overflow-y-auto px-4 pt-4">{children}</div>
+          <div className="phone-shell-scroll app-shell-scroll flex-1 overflow-y-auto px-4 pt-4">{children}</div>
         </section>
       </div>
     </main>
@@ -2633,34 +2629,32 @@ function AuthScreen({
   }
 
   return (
-    <div className="space-y-3">
-      <MobilePanel>
-        <p className="text-xs font-semibold text-[#ef6351]">Andante</p>
-        <h1 className="mt-2 text-2xl font-semibold">로그인</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">
-          회원가입 후 관리자의 승인이 있어야 사용 가능합니다.
-        </p>
-      </MobilePanel>
-
-      <MobilePanel>
-        <div className="grid grid-cols-2 gap-2">
+    <div className="auth-screen">
+      <header className="auth-brand">
+        <div className="auth-brand-identity">
+          <span className="auth-brand-icon"><img src="/icon-192.png" width={40} height={40} alt="" /></span>
+          <div><AppInfoTrigger className="auth-brand-name" /><p>합주 일정 관리</p></div>
+        </div>
+        <AppearanceSelector />
+      </header>
+      <section className="auth-card" aria-labelledby="auth-title">
+        <div className="auth-card-heading">
+          <h1 id="auth-title">{mode === "login" ? "로그인" : "가입 신청"}</h1>
+          <p>{mode === "login" ? "계정으로 로그인하고 합주 일정을 확인하세요." : "정보를 입력하고 안단테 가입을 신청하세요."}</p>
+        </div>
+        <div className="auth-mode-switch" role="group" aria-label="계정 이용 방식">
           {(["login", "signup"] as const).map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => setMode(item)}
-              className={`h-10 rounded-lg border text-sm font-semibold ${
-                mode === item ? "border-slate-950 bg-slate-950 text-white" : "border-[#f0ded7] bg-white"
-              }`}
+              aria-pressed={mode === item}
             >
               {item === "login" ? "로그인" : "회원가입"}
             </button>
           ))}
         </div>
-      </MobilePanel>
-
-      <MobilePanel title={mode === "login" ? "계정 로그인" : "가입 신청"}>
-        <div className="space-y-3">
+        <div className="auth-fields space-y-4">
           <LabeledInput label="이메일" value={email} onChange={setEmail} placeholder="name@example.com" type="email" />
           <LabeledInput label="비밀번호" value={password} onChange={setPassword} placeholder="8자 이상" type="password" />
 
@@ -2678,11 +2672,12 @@ function AuthScreen({
             <p className="rounded-lg bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-[#be3d33]">{notice || message}</p>
           )}
 
-          <button type="button" onClick={submit} className="h-12 w-full rounded-lg bg-[#ff665a] text-sm font-semibold text-white">
+          <button type="button" onClick={submit} className="auth-submit">
             {mode === "login" ? "로그인하기" : "가입 신청하기"}
           </button>
         </div>
-      </MobilePanel>
+      </section>
+      <p className="auth-approval-note">회원가입 후 관리자의 승인이 있어야 사용할 수 있어요.</p>
     </div>
   );
 }
@@ -2887,7 +2882,7 @@ function AppHeader({
     <header className="workspace-header shrink-0 px-4 pb-2 pt-1">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold text-[#ef6351]">Andante</p>
+          <AppInfoTrigger className="app-info-header" />
           <h2 className="mt-1 text-2xl font-semibold">
             <span className="workspace-mobile-label">{desktopTitle ?? "홈"}</span>
             <span className="workspace-desktop-label">{desktopTitle ?? "합주 예약"}</span>
@@ -3253,11 +3248,12 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
   const reservationsByDate = byDate;
   const cells = useMemo(() => threeWeekCalendarCells(anchorDate), [anchorDate]);
   const isCompact = selectedDate !== null;
+  const detailDate = selectedDate ?? anchorDate;
   function changePeriod(date: string) { setAnchorDate(date); setSelectedDate(null); }
   return (
-    <div className="space-y-3">
+    <div className="calendar-layout space-y-3">
       <MobilePanel title="캘린더" className="calendar-panel readable-compact">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="calendar-toolbar mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold" aria-live="polite">
             {anchorDate.slice(0, 4)}.{formatDateShort(anchorDate)} – {formatDateShort(addDays(anchorDate, 20))}
           </p>
@@ -3290,7 +3286,7 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
           <button
             type="button"
             onClick={() => setSelectedDate(null)}
-            className="w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-1.5 text-xs font-semibold text-[#b8493f]"
+            className="calendar-expand w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-1.5 text-xs font-semibold text-[#b8493f]"
           >
             전체 보기
           </button>
@@ -3313,7 +3309,7 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
               return (
                 <div
                   key={`empty-month-${index}`}
-                  className={isCompact ? "h-11" : "h-[124px]"}
+                  className={`calendar-day ${isCompact ? "h-11" : "h-[124px]"}`}
                   aria-hidden="true"
                 />
               );
@@ -3324,7 +3320,7 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
                 key={date}
                 type="button"
                 onClick={() => setSelectedDate(date)}
-                className={`flex min-w-0 flex-col items-stretch justify-start px-0.5 pt-1 text-left transition ${
+                className={`calendar-day flex min-w-0 flex-col items-stretch justify-start px-0.5 pt-1 text-left transition ${
                   isCompact ? "h-11" : "h-[124px]"
                 } ${isSelected ? "bg-[#fff4ef]" : "bg-white"}`}
                 aria-pressed={isSelected}
@@ -3346,17 +3342,15 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
                   {formatDateShort(date)}
                 </span>
 
-                {isCompact ? (
-                  dayReservations.length > 0 && (
-                    <span className="mt-1 flex items-center justify-center gap-0.5" aria-hidden="true">
+                {isCompact && dayReservations.length > 0 && (
+                    <span className="calendar-dots mt-1 flex items-center justify-center gap-0.5" aria-hidden="true">
                       {dayReservations.slice(0, 5).map((reservation) => (
                         <span key={reservation.id} className="h-1 w-1 rounded-full bg-[#ef8e7f]" />
                       ))}
                       {dayReservations.length > 5 && <span className="text-[8px] leading-none text-[#d45145]">+</span>}
                     </span>
-                  )
-                ) : (
-                  <span className="mt-1 block space-y-0.5 overflow-hidden">
+                )}
+                  <span className={`calendar-events mt-1 block space-y-0.5 overflow-hidden ${isCompact ? "is-compact" : ""}`}>
                     {dayReservations.slice(0, 4).map((reservation) => (
                       <span
                         key={reservation.id}
@@ -3371,17 +3365,17 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
                       </span>
                     ))}
                     {dayReservations.length > 4 && (
-                      <span className="block text-center text-[9px] font-semibold text-slate-400">+{dayReservations.length - 4}</span>
+                      <span className="calendar-event-more block text-center text-[9px] font-semibold text-slate-400">+{dayReservations.length - 4}</span>
                     )}
                   </span>
-                )}
               </button>
             );
           })}
         </div>
       </MobilePanel>
 
-      {selectedDate && !loading && !error && <ReservationDetailPanel date={selectedDate} reservations={periodRows} ownTeamIds={ownTeamIds} />}
+      {!loading && !error && <ReservationDetailPanel date={detailDate} reservations={periodRows} ownTeamIds={ownTeamIds}
+        className={`calendar-details ${selectedDate ? "" : "calendar-details-desktop"}`} />}
     </div>
   );
 }
