@@ -3892,6 +3892,7 @@ function MyPageTab({
               ))}
               {rehearsalLeaderboard.length === 0 && <EmptyText text="아직 순위 데이터가 없습니다." />}
             </div>
+            <p className="mt-3 break-keep text-[10px] leading-4 text-slate-500">가을축제 이전 합주시간은 부정확하여 집계하지 않습니다.</p>
           </div>
         )}
       </MobilePanel>
