@@ -92,6 +92,7 @@
 .recap-story-preview { display: block; width: auto; height: auto; max-width: 100%; max-height: max(100px, calc(85dvh - 230px)); aspect-ratio: 9 / 16; object-fit: contain; }
 .recap-story-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; width: 100%; font-size: 13px; }
 .recap-story-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.recap-story-cover-hint { flex-shrink: 0; max-width: 100%; margin: 0; padding: 0 4px; color: #526570; font-size: 12px; line-height: 1.6; text-align: center; word-break: keep-all; }
 .recap-story-actions > a, .recap-story-actions > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin: 0; width: auto; font-size: 13px; }
 .recap-story-actions > a.recap-primary { background: #e8ecec; color: #202b35; border: 1px solid #bdc6c6; }
 .recap-story-actions > a.recap-primary:hover { background: #ffffff; }

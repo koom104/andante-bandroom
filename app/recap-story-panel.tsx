@@ -73,6 +73,7 @@ function StoryImage({ data, name, year, page, index, total, backgroundTeamId, on
       {canShare && <button className="recap-secondary" type="button" disabled={sharing} onClick={() => void share()}><Share2 size={18} /> 공유</button>}
       {index === 0 && <button className="recap-secondary" type="button" onClick={() => setChoosingBackground(true)}><ImagePlus size={18} /> 배경 곡 변경</button>}
     </div>}
+    {image && <p className="recap-story-cover-hint">앨범 커버는 상세 기록의 ‘커버 변경’에서 곡별로 지정할 수 있어요.</p>}
     {choosingBackground && <BackgroundSongDialog data={data} selectedId={backgroundTeamId} onClose={() => setChoosingBackground(false)}
       onSelect={(id) => { setChoosingBackground(false); onBackgroundChange(id); }} />}
   </div>;
