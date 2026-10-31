@@ -3257,6 +3257,35 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
   return (
     <div className="space-y-3">
       <MobilePanel title="캘린더" className="readable-compact">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold" aria-live="polite">
+            {anchorDate.slice(0, 4)}.{formatDateShort(anchorDate)} – {formatDateShort(addDays(anchorDate, 20))}
+          </p>
+          <div className="flex items-center gap-1" role="group" aria-label="캘린더 기간 이동">
+            <button type="button" aria-label="이전 3주 보기" title="이전 기간"
+              onClick={() => changePeriod(addDays(anchorDate, -21))}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white">
+              <ChevronLeft size={18} />
+            </button>
+            <button type="button" onClick={() => changePeriod(today)}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold">오늘</button>
+            <button type="button" aria-label="다음 3주 보기" title="다음 기간"
+              onClick={() => changePeriod(addDays(anchorDate, 21))}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white">
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </div>
+        <details className="mb-2">
+          <summary className="cursor-pointer text-xs text-slate-500">날짜로 이동</summary>
+          <label className="calendar-history-jump mt-2">
+            <span>조회 시작 날짜</span>
+            <input type="date" aria-label="캘린더 조회 시작 날짜" min="2000-01-01" max={addDays(today, 365)} value={anchorDate}
+              onChange={(event) => { if (event.target.value) changePeriod(event.target.value); }} />
+          </label>
+        </details>
+        {loading && <LoadingStatus label="합주 예약을 불러오고 있어요." />}
+        {error && <p role="alert" className="mb-2 text-sm text-red-700">{error}</p>}
         {isCompact && (
           <button
             type="button"
