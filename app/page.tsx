@@ -3192,7 +3192,7 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
   allTeams: Team[];
 }) {
   const today = todayISO();
-  const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [anchorDate, setAnchorDate] = useState(today);
   const [periodRows, setPeriodRows] = useState<Reservation[]>(reservations);
   const [loading, setLoading] = useState(false);
@@ -3219,11 +3219,13 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
       const mapped: Reservation[] = rows.map((row) => {
         const teamId = String(row.team_id ?? "");
         const team = allTeams.find((entry) => entry.id === teamId);
+        const existing = reservations.find((entry) => entry.id === String(row.booking_id ?? row.id));
+        const leader = team?.members.find((entry) => entry.id === team.leaderId);
         const bookingType = row.booking_type === "room_block" ? "room_block" : "rehearsal";
         return {
           id: String(row.booking_id ?? row.id), teamId,
           teamName: bookingType === "room_block" ? "사용 제한" : String(row.team_name ?? team?.name ?? "삭제된 팀"),
-          teamSong: String(row.goal ?? team?.song ?? ""), leaderName: "", memberCount: team?.members.length ?? 0,
+          teamSong: String(row.goal ?? team?.song ?? ""), leaderName: existing?.leaderName ?? leader?.name ?? "-", leaderRole: existing?.leaderRole ?? leader?.role, memberCount: team?.members.length ?? 0,
           bookingDate: String(row.booking_date), day: dateToDay(String(row.booking_date)),
           start: String(row.start_time), duration: Number(row.duration), purpose: String(row.purpose ?? row.goal ?? ""),
           status: "confirmed", location: row.booking_location === "external" ? "external" : "club_room", bookingType,
@@ -3248,43 +3250,111 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
     return grouped;
   }, [periodRows]);
   const own = (row: Reservation) => row.isOwnTeam || ownTeamIds.has(row.teamId);
-  const selected = byDate.get(selectedDate) ?? [];
-  function changePeriod(date: string) { setAnchorDate(date); setSelectedDate(date); }
-  return <MobilePanel title="캘린더" className="calendar-panel calendar-history-panel readable-compact">
-    <div className="calendar-team-legend" aria-label="예약 색상 안내"><span><i className="calendar-own-dot" />내 팀</span><span><i className="calendar-other-dot" />다른 팀</span></div>
-    <div className="admin-cancellation-layout">
-      <div className="admin-cancellation-calendar">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <p className="text-sm font-semibold">{anchorDate.slice(0,4)}.{formatDateShort(anchorDate)} – {formatDateShort(addDays(anchorDate,20))}</p>
-          <div className="flex items-center gap-1">
-            <button type="button" title="이전 기간" aria-label="이전 기간" onClick={() => changePeriod(addDays(anchorDate,-21))}
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white"><ChevronLeft size={18} /></button>
-            <button type="button" onClick={() => changePeriod(today)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold">오늘</button>
-            <button type="button" title="다음 기간" aria-label="다음 기간" onClick={() => changePeriod(addDays(anchorDate,21))}
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white"><ChevronRight size={18} /></button>
-          </div>
+  const reservationsByDate = byDate;
+  const cells = useMemo(() => threeWeekCalendarCells(anchorDate), [anchorDate]);
+  const isCompact = selectedDate !== null;
+  function changePeriod(date: string) { setAnchorDate(date); setSelectedDate(null); }
+  return (
+    <div className="space-y-3">
+      <MobilePanel title="캘린더" className="readable-compact">
+        {isCompact && (
+          <button
+            type="button"
+            onClick={() => setSelectedDate(null)}
+            className="w-full rounded-md border border-[#efc9c1] bg-[#fff8f4] px-3 py-1.5 text-xs font-semibold text-[#b8493f]"
+          >
+            전체 보기
+          </button>
+        )}
+
+        <div className="mt-2 grid grid-cols-7 border-b border-[#f2e6e1] pb-1 text-center text-[11px] font-semibold text-slate-500">
+          {dateDayNames.map((day, index) => (
+            <span key={day} className={index === 0 ? "text-[#d45145]" : ""}>{day}</span>
+          ))}
         </div>
-        <label className="calendar-history-jump"><span>날짜로 이동</span><input type="date" aria-label="캘린더 조회 시작 날짜" min="2000-01-01" max={addDays(today,365)} value={anchorDate}
-          onChange={(event) => { if (event.target.value) changePeriod(event.target.value); }} /></label>
-        <ThreeWeekCalendar selectedDate={selectedDate} onSelectDate={setSelectedDate} anchorDate={anchorDate} compact
-          hasMarker={(date) => (byDate.get(date)?.length ?? 0) > 0}
-          markerTone={(date) => byDate.get(date)?.some(own) ? "own" : "other"}
-          dateLabel={(date) => `${formatDateLabel(date)} ${byDate.get(date)?.length ?? 0}건 예약${byDate.get(date)?.some(own) ? ", 내 팀 예약 있음" : ""}`} />
-      </div>
-      <div className="admin-cancellation-list calendar-history-list" aria-live="polite" aria-busy={loading}>
-        <div className="mb-3 flex items-center justify-between gap-2"><h4 className="text-sm font-semibold">{formatDateLabel(selectedDate)}</h4><span className="text-xs text-slate-500">{loading ? "조회 중" : `${selected.length}건`}</span></div>
-        {loading ? <LoadingStatus label="합주 예약을 불러오고 있어요." /> : error ? <p role="alert" className="text-sm text-red-700">{error}</p>
-          : selected.length === 0 ? <EmptyText text="선택한 날짜에 합주 예약이 없습니다." />
-          : <div className="calendar-history-records">{selected.map((row) => <article key={row.id} className={`calendar-history-record ${own(row) ? "is-own-team" : "is-other-team"}`}>
-            <div className="calendar-record-heading"><strong>{row.start}–{addHours(row.start,row.duration)}</strong>{own(row) && <span className="calendar-own-badge">내 팀</span>}</div>
-            <p className="calendar-record-title">{row.teamName}</p>
-            <p className="calendar-record-meta">{row.bookingType === "room_block" ? "사용 제한" : row.location === "external" ? "외부 합주실" : "동아리방"}{row.purpose ? ` · ${row.purpose}` : ""}
-              {row.sourceType === "notion_history" ? " · 과거 예약 기준" : ""}</p>
-            {row.creditedMinutes != null && row.creditedMinutes < row.duration*60 && <p className="calendar-record-meta">공동 예약 · 팀별 집계 {formatDuration(row.creditedMinutes/60)}</p>}
-          </article>)}</div>}
-      </div>
+
+        <div className="grid grid-cols-7">
+          {cells.map((date, index) => {
+            const dayReservations = date ? reservationsByDate.get(date) ?? [] : [];
+            const isSelected = date === selectedDate;
+            const isToday = date === today;
+            const isPast = Boolean(date && date < today && anchorDate === today);
+
+            if (!date) {
+              return (
+                <div
+                  key={`empty-month-${index}`}
+                  className={isCompact ? "h-11" : "h-[124px]"}
+                  aria-hidden="true"
+                />
+              );
+            }
+
+            return (
+              <button
+                key={date}
+                type="button"
+                onClick={() => setSelectedDate(date)}
+                className={`flex min-w-0 flex-col items-stretch justify-start px-0.5 pt-1 text-left transition ${
+                  isCompact ? "h-11" : "h-[124px]"
+                } ${isSelected ? "bg-[#fff4ef]" : "bg-white"}`}
+                aria-pressed={isSelected}
+                aria-label={`${formatDateLabel(date)} ${dayReservations.length}건 예약`}
+              >
+                <span
+                  className={`mx-auto flex h-6 min-w-8 max-w-[42px] items-center justify-center rounded-md px-1 text-[10px] font-semibold ${
+                    isSelected
+                      ? "text-slate-950"
+                      : isToday
+                        ? "bg-slate-950 text-white"
+                        : isPast
+                          ? "text-slate-300"
+                          : index % 7 === 0
+                            ? "text-[#d45145]"
+                            : "text-slate-700"
+                  }`}
+                >
+                  {formatDateShort(date)}
+                </span>
+
+                {isCompact ? (
+                  dayReservations.length > 0 && (
+                    <span className="mt-1 flex items-center justify-center gap-0.5" aria-hidden="true">
+                      {dayReservations.slice(0, 5).map((reservation) => (
+                        <span key={reservation.id} className="h-1 w-1 rounded-full bg-[#ef8e7f]" />
+                      ))}
+                      {dayReservations.length > 5 && <span className="text-[8px] leading-none text-[#d45145]">+</span>}
+                    </span>
+                  )
+                ) : (
+                  <span className="mt-1 block space-y-0.5 overflow-hidden">
+                    {dayReservations.slice(0, 4).map((reservation) => (
+                      <span
+                        key={reservation.id}
+                        className={`calendar-event-label block truncate rounded-sm border px-0.5 py-0.5 text-[9px] font-semibold leading-3 ${own(reservation) ? "is-own-team" : "is-other-team"}`}
+                        title={`${reservation.start} ${reservation.teamName}${own(reservation) ? " · 내 팀" : ""}`}
+                      >
+                        {reservation.bookingType === "room_block"
+                          ? "사용 제한"
+                          : reservation.location === "external"
+                            ? `${reservation.teamName} · 외부`
+                            : reservation.teamName}
+                      </span>
+                    ))}
+                    {dayReservations.length > 4 && (
+                      <span className="block text-center text-[9px] font-semibold text-slate-400">+{dayReservations.length - 4}</span>
+                    )}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </MobilePanel>
+
+      {selectedDate && !loading && !error && <ReservationDetailPanel date={selectedDate} reservations={periodRows} ownTeamIds={ownTeamIds} />}
     </div>
-  </MobilePanel>;
+  );
 }
 
 function SuggestionsTab({
@@ -5686,7 +5756,7 @@ function ReservationDetailPanel({
     <MobilePanel title={title ?? `${formatDateLabel(date)} 예약 상세`} className={`readable-compact ${className}`}>
       <div className="function-group space-y-1">
         {dayReservations.map((reservation) => {
-          const isMine = ownTeamIds.has(reservation.teamId);
+          const isMine = reservation.isOwnTeam || ownTeamIds.has(reservation.teamId);
           const isRoomBlock = reservation.bookingType === "room_block";
 
           return (
