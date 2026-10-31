@@ -805,24 +805,15 @@ security definer
 set search_path = public
 as $$
 declare
-  is_owner boolean := lower(coalesce(new.email, '')) = 'k91372960@gmail.com';
   has_privacy_consent boolean := coalesce(new.raw_user_meta_data ->> 'privacy_consent', '') = 'true';
 begin
-  if not is_owner and not has_privacy_consent then
+  if not has_privacy_consent then
     raise exception 'privacy consent required';
   end if;
 
   insert into public.profiles (
-    id,
-    email,
-    name,
-    cohort,
-    student_no,
-    role,
-    status,
-    approved_at,
-    privacy_consent_at,
-    privacy_consent_version
+    id, email, name, cohort, student_no, role, status, approved_at,
+    privacy_consent_at, privacy_consent_version
   )
   values (
     new.id,
@@ -830,22 +821,18 @@ begin
     coalesce(nullif(new.raw_user_meta_data ->> 'name', ''), '이름 미입력'),
     coalesce(nullif(new.raw_user_meta_data ->> 'cohort', ''), '-'),
     coalesce(nullif(new.raw_user_meta_data ->> 'student_no', ''), '-'),
-    case when is_owner then 'admin' else 'member' end,
-    case when is_owner then 'approved' else 'pending' end,
-    case when is_owner then now() else null end,
-    case when has_privacy_consent then now() else null end,
-    case
-      when has_privacy_consent
-        then nullif(new.raw_user_meta_data ->> 'privacy_consent_version', '')
-      else null
-    end
+    'member', 'pending', null,
+    now(),
+    nullif(new.raw_user_meta_data ->> 'privacy_consent_version', '')
   )
-  on conflict (id) do update
-    set email = excluded.email;
+  on conflict (id) do nothing;
 
   return new;
 end;
 $$;
+
+-- Trigger execution does not require granting clients direct execution.
+revoke all on function public.handle_new_user() from public, anon, authenticated;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
@@ -2214,32 +2201,7 @@ cross join lateral (
 ) slot
 on conflict (booking_id, user_id, start_time) do nothing;
 
-insert into public.profiles (
-  id,
-  email,
-  name,
-  cohort,
-  student_no,
-  role,
-  status,
-  approved_at
-)
-select
-  id,
-  email,
-  coalesce(nullif(raw_user_meta_data ->> 'name', ''), '관리자'),
-  coalesce(nullif(raw_user_meta_data ->> 'cohort', ''), '-'),
-  coalesce(nullif(raw_user_meta_data ->> 'student_no', ''), '-'),
-  'admin',
-  'approved',
-  now()
-from auth.users
-where lower(email) = 'k91372960@gmail.com'
-on conflict (id) do update
-  set role = 'admin',
-      status = 'approved',
-      approved_at = coalesce(public.profiles.approved_at, now());
-
+-- Provision initial administrators explicitly by verified Auth user UUID.
 
 create table if not exists public.member_recap_covers (
   user_id uuid not null references public.profiles(id) on delete cascade,

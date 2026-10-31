@@ -96,13 +96,15 @@ Supabase 프로젝트를 만든 뒤 SQL Editor에서 아래 순서로 실행합�
 
 ## 관리자 계정
 
-`supabase/schema.sql` 하단의 관리자 이메일 조건을 실제 관리자 이메일로 바꾼 뒤 실행합니다.
+신규 가입은 이메일과 관계없이 일반 부원·승인 대기로 생성됩니다. 최초 관리자는 Supabase Auth 가입 후 본인 확인을 마친 사용자의 UUID로 SQL Editor에서 명시적으로 지정합니다.
 
 ```sql
-where lower(email) = 'your-admin-email@example.com'
+update public.profiles
+set role = 'admin', status = 'approved', approved_at = now()
+where id = '확인한-사용자-UUID'::uuid;
 ```
 
-관리자는 Supabase Auth에 먼저 가입되어 있어야 하며, SQL 실행 후 `profiles`에서 관리자/승인 상태로 보정됩니다.
+기존 DB는 `supabase/patch-042-explicit-admin-provisioning.sql`을 적용하면 이메일 기반 자동 관리자 승격을 제거할 수 있습니다. 기존 관리자와 승인 상태는 바뀌지 않습니다.
 
 ## 빌드
 
