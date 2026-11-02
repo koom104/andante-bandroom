@@ -13,6 +13,7 @@ import { AppearanceSelector } from "./appearance";
 import { sessionDisplayOrder, sortTeamMembersBySession } from "./team-member-order";
 import { sortGoalCategories } from "./goal-order";
 import { AppInfoTrigger } from "./app-info";
+import { reservationDisplayGoal } from "./reservation-goal";
 
 type Day = "월" | "화" | "수" | "목" | "금" | "토" | "일";
 const RecapTab = lazy(() => import("./recap-tab"));
@@ -1152,7 +1153,7 @@ export default function Home() {
         day: booking.day_of_week,
         start: booking.start_time,
         duration: booking.duration,
-        purpose: booking.purpose,
+        purpose: reservationDisplayGoal(team?.song, booking.purpose, "booking", bookingType),
         status: booking.status,
         location: booking.booking_location === "external" ? "external" : "club_room",
         bookingType,
@@ -3217,12 +3218,14 @@ function CalendarTab({ reservations, ownTeamIds, allTeams }: {
         const existing = reservations.find((entry) => entry.id === String(row.booking_id ?? row.id));
         const leader = team?.members.find((entry) => entry.id === team.leaderId);
         const bookingType = row.booking_type === "room_block" ? "room_block" : "rehearsal";
+        const goal = reservationDisplayGoal(team?.song, String(row.purpose ?? row.goal ?? ""),
+          row.source_type === "notion_history" ? "notion_history" : "booking", bookingType);
         return {
           id: String(row.booking_id ?? row.id), teamId,
           teamName: bookingType === "room_block" ? "사용 제한" : String(row.team_name ?? team?.name ?? "삭제된 팀"),
-          teamSong: String(row.goal ?? team?.song ?? ""), leaderName: existing?.leaderName ?? leader?.name ?? "-", leaderRole: existing?.leaderRole ?? leader?.role, memberCount: team?.members.length ?? 0,
+          teamSong: goal, leaderName: existing?.leaderName ?? leader?.name ?? "-", leaderRole: existing?.leaderRole ?? leader?.role, memberCount: team?.members.length ?? 0,
           bookingDate: String(row.booking_date), day: dateToDay(String(row.booking_date)),
-          start: String(row.start_time), duration: Number(row.duration), purpose: String(row.purpose ?? row.goal ?? ""),
+          start: String(row.start_time), duration: Number(row.duration), purpose: goal,
           status: "confirmed", location: row.booking_location === "external" ? "external" : "club_room", bookingType,
           sourceType: row.source_type === "notion_history" ? "notion_history" : "booking",
           creditedMinutes: row.credited_minutes == null ? undefined : Number(row.credited_minutes),
